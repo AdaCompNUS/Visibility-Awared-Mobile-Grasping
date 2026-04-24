@@ -1,4 +1,4 @@
-# Mobile Grasping in Dynamic Environments
+# Visibility-Awared Mobile Grasping in Dynamic Environments
 
 > **Paper:** *Visibility-Aware Mobile Grasping in Dynamic Environments*
 >
