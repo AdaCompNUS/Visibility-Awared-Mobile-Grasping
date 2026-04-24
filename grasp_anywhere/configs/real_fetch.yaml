@@ -1,0 +1,47 @@
+robot:
+  urdf_path: "resources/fetch_ext/fetch ext.urdf"
+  costmap_path: "resources/costmap.npz"
+
+environment:
+  pcd_path: "resources/mp_collision_models/"
+  pcd_files:
+    - "coffee_table.ply"
+    - "open_kitchen.ply"
+    - "rls_2.ply"
+    - "sofa.ply"
+    - "table.ply"
+    - "wall.ply"
+    - "workstation.ply"
+  ground_z_threshold: 0.1
+
+planning:
+  scheduler_type: "default" # Options: "default", "sequential"
+  manipulation_radius: 0.7
+  enable_replanning: True
+  enable_icp_refinement: False
+  enable_pcd_alignment: False
+  dynamic_costmap: False
+  capability_map_path: "resources/capability_map.pkl"
+  reachability_map_path: "resources/reachability_map.pkl"
+  torso_map_path: "resources/torso_map.pkl"
+
+services:
+  graspnet_url: "http://localhost:4003"
+  owl_url: "http://localhost:4000"
+  sam_url: "http://localhost:4001"
+
+debug:
+  enable_visualization: False
+  enable_debug: True
+
+gaze:
+  lookahead_window: 40
+  decay_rate: 0.999
+  velocity_weight: 1.0
+  joint_priorities:
+    base: 3.0
+    torso: 2.0
+    shoulder_lift: 1.3
+    elbow: 1.1
+    wrist_flex: 1.0
+    gripper: 1.0

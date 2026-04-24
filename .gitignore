@@ -1,0 +1,58 @@
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# ── IDE / Editor ──────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Environment ───────────────────────────────────────────
+.env
+.venv/
+env/
+venv/
+
+# ── Testing / Linting ────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# ── Generated data (use cloud backup) ────────────────────
+data/
+outputs/
+results/
+paper_figures/
+debug/
+trajectory_data/
+replanning_data/
+*.zip
+
+# ── Large resource files (use scripts/download_resources.sh)
+resources/*.pkl
+resources/costmap.npz
+
+# ── Benchmark generated artifacts ─────────────────────────
+resources/benchmark/
+
+# ── Media files ───────────────────────────────────────────
+*.png
+*.jpg
+*.mp4
+*.avi
+
+# ── Misc ──────────────────────────────────────────────────
+*.log
+grasp_info.npz
+camera_pose.json
+.codex
+rebuttal/

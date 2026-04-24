@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mobile_grasping_in_dynamic"
+version = "1.0.0"
+description = "Visibility-Aware Mobile Grasping in Dynamic Environments"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "flask",
+    "opencv-python",
+    "requests",
+    "transformers",
+    "open3d",
+    "small_gicp",
+    "rospkg",
+    "rich",
+    "mani_skill",
+    "pyrender",
+    "trimesh",
+    "pyyaml",
+    "scipy",
+    "matplotlib",
+    "Pillow",
+    "numpy",
+    "h5py",
+    "gymnasium",
+    "sapien",
+    "tqdm",
+    "pytorch-kinematics",
+    "scikit-learn",
+    "openai",
+    "pydub",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "pre-commit",
+]
+
+[tool.setuptools.packages.find]
+include = ["grasp_anywhere*"]

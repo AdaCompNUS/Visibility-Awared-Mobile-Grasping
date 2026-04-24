@@ -1,0 +1,184 @@
+<?xml version="1.0"?>
+<!--
+  Oracle / virtual gripper URDF (box approximation), Fetch-like parallel jaw.
+
+  IMPORTANT: This URDF now includes a 6-DoF "floating base" joint chain
+  (x,y,z,roll,pitch,yaw) so the gripper pose can be controlled via joint targets
+  (i.e. "actions") instead of teleporting via set_root_pose().
+
+  Active joints (8):
+    oracle_x_joint, oracle_y_joint, oracle_z_joint,
+    oracle_roll_joint, oracle_pitch_joint, oracle_yaw_joint,
+    oracle_finger_left_joint, oracle_finger_right_joint
+
+  Frame convention (chosen to match tools/grasp_oracle.py default):
+  - +Z: approach direction (fingers extend along +Z)
+  - +/-Y: opening/closing direction (fingers translate along +/-Y)
+  - +X: "height"/thickness direction of palm & fingers
+
+  Opening width between inner finger faces is ~ 2 * q, where q is the prismatic joint position.
+-->
+<robot name="oracle_box_gripper">
+  <link name="oracle_world_link"/>
+
+  <link name="oracle_x_link"/>
+  <joint name="oracle_x_joint" type="prismatic">
+    <parent link="oracle_world_link"/>
+    <child link="oracle_x_link"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-10" upper="10" effort="2000" velocity="5"/>
+  </joint>
+
+  <link name="oracle_y_link"/>
+  <joint name="oracle_y_joint" type="prismatic">
+    <parent link="oracle_x_link"/>
+    <child link="oracle_y_link"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-10" upper="10" effort="2000" velocity="5"/>
+  </joint>
+
+  <link name="oracle_z_link"/>
+  <joint name="oracle_z_joint" type="prismatic">
+    <parent link="oracle_y_link"/>
+    <child link="oracle_z_link"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-10" upper="10" effort="2000" velocity="5"/>
+  </joint>
+
+  <link name="oracle_roll_link"/>
+  <joint name="oracle_roll_joint" type="continuous">
+    <parent link="oracle_z_link"/>
+    <child link="oracle_roll_link"/>
+    <axis xyz="1 0 0"/>
+  </joint>
+
+  <link name="oracle_pitch_link"/>
+  <joint name="oracle_pitch_joint" type="continuous">
+    <parent link="oracle_roll_link"/>
+    <child link="oracle_pitch_link"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <link name="oracle_yaw_link"/>
+  <joint name="oracle_yaw_joint" type="continuous">
+    <parent link="oracle_pitch_link"/>
+    <child link="oracle_yaw_link"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <!-- Root / palm -->
+  <link name="oracle_palm_link">
+    <inertial>
+      <origin xyz="0 0 -0.01" rpy="0 0 0"/>
+      <mass value="0.20"/>
+      <!-- Box inertia for size (x=0.02, y=0.12, z=0.02), m=0.20 -->
+      <inertia ixx="0.0002467" ixy="0" ixz="0" iyy="0.0000133" iyz="0" izz="0.0002467"/>
+    </inertial>
+    <visual>
+      <!-- Palm is behind the grasp origin so the grasp origin is at the palm front face (z=0). -->
+      <origin xyz="0 0 -0.01" rpy="0 0 0"/>
+      <geometry>
+        <!-- size: (finger_height, open_width + 2*finger_thickness, palm_thickness) -->
+        <box size="0.02 0.12 0.02"/>
+      </geometry>
+      <material name="oracle_gray">
+        <color rgba="0.35 0.35 0.35 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.01" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.12 0.02"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="oracle_base_to_palm_fixed" type="fixed">
+    <parent link="oracle_yaw_link"/>
+    <child link="oracle_palm_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Left finger -->
+  <link name="oracle_finger_left_link">
+    <inertial>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <!-- Box inertia for size (x=0.02, y=0.01, z=0.10), m=0.05 -->
+      <inertia ixx="0.0000421" ixy="0" ixz="0" iyy="0.0000433" iyz="0" izz="0.0000021"/>
+    </inertial>
+    <visual>
+      <!-- Finger extends from z=0..0.10 in the finger frame -->
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry>
+        <!-- size: (finger_height, finger_thickness, finger_length) -->
+        <box size="0.02 0.01 0.10"/>
+      </geometry>
+      <material name="oracle_dark">
+        <color rgba="0.15 0.15 0.15 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.01 0.10"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Right finger -->
+  <link name="oracle_finger_right_link">
+    <inertial>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.0000421" ixy="0" ixz="0" iyy="0.0000433" iyz="0" izz="0.0000021"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.01 0.10"/>
+      </geometry>
+      <material name="oracle_dark"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.01 0.10"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Prismatic finger joints
+
+    q = 0: inner finger faces are (approximately) at y=0.
+    q > 0: fingers move outward (+Y for left, -Y for right).
+    Max opening between inner faces ~= 2 * 0.05 = 0.10m.
+  -->
+  <joint name="oracle_finger_left_joint" type="prismatic">
+    <parent link="oracle_palm_link"/>
+    <child link="oracle_finger_left_link"/>
+    <!-- Offset the finger by half thickness so inner face is at y=0 when q=0 -->
+    <origin xyz="0 0.005 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="0.05" effort="200" velocity="0.2"/>
+    <dynamics damping="2.0" friction="0.0"/>
+  </joint>
+
+  <joint name="oracle_finger_right_joint" type="prismatic">
+    <parent link="oracle_palm_link"/>
+    <child link="oracle_finger_right_link"/>
+    <origin xyz="0 -0.005 0" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
+    <limit lower="0" upper="0.05" effort="200" velocity="0.2"/>
+    <dynamics damping="2.0" friction="0.0"/>
+  </joint>
+
+  <!-- Optional convenience frames (common robotics naming) -->
+  <link name="oracle_tool0"/>
+  <joint name="oracle_tool0_fixed" type="fixed">
+    <parent link="oracle_palm_link"/>
+    <child link="oracle_tool0"/>
+    <!-- tool0 at grasp origin / palm front face -->
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+</robot>
