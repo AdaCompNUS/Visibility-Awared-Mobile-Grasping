@@ -1,0 +1,3 @@
+[submodule "third_party/perception_services"]
+	path = third_party/perception_services
+	url = https://github.com/threefruits/perception_services.git

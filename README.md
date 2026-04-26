@@ -88,9 +88,9 @@ The grasp generation client expects a local HTTP service at
 `http://localhost:4003`. It must expose `/sample_grasp` and
 `/sample_grasp_with_context`.
 
-Perception services for open-vocabulary detection and segmentation are not
-included in this release yet. They will be wrapped and released separately. Code
-paths that use OWL-ViT/SAM still expect compatible local services.
+Perception services (GraspNet, OWL-ViT, SAM) are provided as a git submodule
+under [`third_party/perception_services`](third_party/perception_services/README.md).
+See its README for setup and launch instructions.
 
 | Service   | Default URL            | Description                    |
 |-----------|------------------------|--------------------------------|
