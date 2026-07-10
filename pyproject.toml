@@ -10,7 +10,10 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "flask",
-    "opencv-python",
+    # NOTE: cv2 is provided by conda `opencv` in the pixi env (see pixi.toml).
+    # A second pip `opencv-python` risks a numpy C-ABI clash with the ROS
+    # (cv_bridge) stack, so it is not declared here. `pip install .` users on a
+    # non-ROS setup can add `opencv-python` themselves.
     "requests",
     "transformers",
     "open3d",

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.10"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "pytracik"
+version = "0.1.0"
+description = "ROS-free TRAC-IK inverse-kinematics bindings (pybind11) for mobile_grasping_in_dynamic"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["numpy"]
+
+[tool.scikit-build]
+minimum-version = "0.10"
+build-dir = "build/{wheel_tag}"
+cmake.build-type = "Release"
+# The module is a single compiled extension installed at the wheel root by
+# CMake (install(TARGETS pytracik LIBRARY DESTINATION .)); there is no Python
+# package tree to auto-discover.
+wheel.packages = []

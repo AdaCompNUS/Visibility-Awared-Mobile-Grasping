@@ -1,12 +1,27 @@
 import os
 from typing import List, Optional, Tuple
 
-from trac_ik_python.trac_ik import IK
+import numpy as np
+
+# ROS-free TRAC-IK bindings, built from third_party/pytracik (pybind11 + CMake).
+# Replaces the former `from trac_ik_python.trac_ik import IK` ROS dependency.
+import pytracik
+
+_SOLVE_TYPES = {
+    "Speed": pytracik.SolveType.Speed,
+    "Distance": pytracik.SolveType.Distance,
+    "Manip1": pytracik.SolveType.Manip1,
+    "Manip2": pytracik.SolveType.Manip2,
+}
 
 
 class TracIKSolver:
     """
     TRAC-IK based solver wrapper: accepts seed, solves nearest IK.
+
+    Backed by the vendored, ROS-free ``pytracik`` module (third_party/pytracik)
+    instead of the ``trac_ik_python`` ROS package. The public interface is
+    unchanged.
     """
 
     def __init__(
@@ -23,19 +38,24 @@ class TracIKSolver:
                 raise FileNotFoundError(f"URDF file not found: {urdf_path}")
             with open(urdf_path, "r") as f:
                 urdf_string = f.read()
+        if urdf_string is None:
+            raise ValueError("Either urdf_string or urdf_path must be provided.")
 
-        self._solver = IK(
+        self._solver = pytracik.TRAC_IK(
             base_link,
             ee_link,
-            urdf_string=urdf_string,
-            timeout=timeout,
-            epsilon=epsilon,
-            solve_type="Distance",
+            urdf_string,
+            timeout,
+            epsilon,
+            _SOLVE_TYPES["Distance"],
         )
 
-        limits = self._solver.get_joint_limits()
-        self._lower_limits: Tuple[float, ...] = limits[0]
-        self._upper_limits: Tuple[float, ...] = limits[1]
+        self._lower_limits: Tuple[float, ...] = tuple(
+            pytracik.get_joint_lower_bounds(self._solver)
+        )
+        self._upper_limits: Tuple[float, ...] = tuple(
+            pytracik.get_joint_upper_bounds(self._solver)
+        )
 
     @property
     def num_joints(self) -> int:
@@ -56,16 +76,21 @@ class TracIKSolver:
                 f"Seed length {len(seed)} does not match solver DOF {self.num_joints}."
             )
 
-        sol = self._solver.get_ik(
-            seed,
-            position[0],
-            position[1],
-            position[2],
-            orientation_xyzw[0],
-            orientation_xyzw[1],
-            orientation_xyzw[2],
-            orientation_xyzw[3],
-        )
-        if sol:
-            return list(sol)
+        # pytracik.ik returns [status, q0, q1, ...]; status < 0 means no solution.
+        result = np.asarray(
+            pytracik.ik(
+                self._solver,
+                np.asarray(seed, dtype=np.float64),
+                float(position[0]),
+                float(position[1]),
+                float(position[2]),
+                float(orientation_xyzw[0]),
+                float(orientation_xyzw[1]),
+                float(orientation_xyzw[2]),
+                float(orientation_xyzw[3]),
+            )
+        ).reshape(-1)
+
+        if result.size >= 1 and result[0] >= 0:
+            return result[1:].tolist()
         return None

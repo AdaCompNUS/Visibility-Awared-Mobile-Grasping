@@ -11,14 +11,18 @@ the scripts in this repository.
 ## Prerequisites
 
 - **OS:** Ubuntu 20.04
-- **ROS:** Noetic (for Gazebo / real robot)
+- **ROS:** Noetic (for Gazebo / real robot). The Noetic python bindings are also
+  provided by the pixi environment for the simulation path (the robot code imports
+  them at module load).
 - **CUDA:** 12.4
-- **Python:** 3.9
-- **Conda** (Miniconda or Anaconda)
-- **VAMP:** the motion planner source is vendored under `third_party/vamp`.
-- **TRAC-IK:** `trac_ik_python` is a ROS dependency. Install it from ROS Noetic
-  packages or build/source a TRAC-IK ROS workspace before running planners that
-  use `grasp_anywhere.robot.ik.trac_ik_solver`.
+- **Python:** 3.11 (provided by the pixi environment)
+- **[pixi](https://pixi.sh):** the only tool you need — it creates the environment
+  and compiles the native modules. (The legacy `env.yml` Conda flow is kept for
+  reference but is no longer required.)
+- **VAMP:** the motion planner source is vendored under `third_party/vamp` and is
+  built automatically by `pixi install`.
+- **TRAC-IK:** no ROS `trac_ik_python` needed — a self-contained pybind11 build is
+  vendored under `third_party/pytracik` and compiled by `pixi install`.
 
 ROS-side dependencies used by the real-robot code include `rospy`, `tf`,
 `tf2_ros`, `cv_bridge`, `actionlib`, `sensor_msgs`, `geometry_msgs`,
@@ -27,30 +31,24 @@ Source the ROS workspace before running ROS/Gazebo or real-robot scripts.
 
 ## Installation
 
-### 1. Create the Conda Environment
+The environment is managed entirely by [pixi](https://pixi.sh). A single
+`pixi install` creates the environment, installs the Python/ML stack and the ROS
+Noetic bindings, and compiles the three native modules — `pytracik`
+(third_party/pytracik), `vamp` (third_party/vamp), and `ikfast_fetch`. The two
+CMake modules are built by scikit-build-core, which pulls `cmake`+`ninja` from
+PyPI; their C/C++ dependencies (orocos-kdl, nlopt, eigen) come from the pixi
+environment.
+
+### 1. Create the environment (installs deps + builds the native modules)
 
 ```bash
-conda env create -f env.yml
-conda activate mobile_grasping_in_dynamic
+pixi install
 ```
 
-### 2. Install the Package
+### 2. Download pre-computed resources
 
-```bash
-pip install -e .
-```
-
-### 3. Build IKFast (required for arm motion planning)
-
-```bash
-cd grasp_anywhere/robot/ik/ikfast/fetch
-python setup.py build_ext --inplace
-cd -
-```
-
-### 4. Download Pre-computed Resources
-
-Large resource files (capability map, reachability map, etc.) are not stored in the repository. Download them with:
+Large resource files (capability map, reachability map, etc.) are not stored in the
+repository:
 
 ```bash
 bash scripts/download_resources.sh
@@ -65,12 +63,21 @@ https://www.dropbox.com/scl/fo/9gxri23a1fn4lmudmhat0/AJ3HfBHsj3XLkFANqXZsbb8?rlk
 To mirror the resources elsewhere, set `MOBILE_GRASPING_RESOURCE_URL` to a
 compatible archive download URL.
 
-### 5. Download ManiSkill Assets (for simulation)
+### 3. Download ManiSkill assets (for simulation)
 
 ```bash
-python -m mani_skill.utils.download_asset ReplicaCAD
-python -m mani_skill.utils.download_asset ycb
+pixi run download-assets
 ```
+
+### 4. Validate the environment
+
+```bash
+pixi run smoke     # imports pytracik/vamp/ikfast, solves TRAC-IK, builds a ManiSkill scene
+```
+
+Run any command inside the environment with `pixi run <cmd>`, or open a shell with
+`pixi shell`. (The legacy Conda flow — `conda env create -f env.yml` + `pip install -e .`
++ a manual IKFast build — is still described by `env.yml` but is no longer required.)
 
 ## Third-Party Planner
 
@@ -126,7 +133,9 @@ roslaunch fetch_drivers whole_body_controller.launch controller_type:=mpc
 ### ManiSkill (Simulation)
 
 ```bash
-python experiments/run_maniskill_benchmark.py \
+pixi run run-benchmark
+# equivalently:
+pixi run python experiments/run_maniskill_benchmark.py \
     --config grasp_anywhere/configs/maniskill_fetch.yaml \
     --benchmark resources/grasp_benchmark.json
 ```

@@ -56,3 +56,6 @@ grasp_info.npz
 camera_pose.json
 .codex
 rebuttal/
+
+# pixi environment (do not commit the solved env)
+.pixi/

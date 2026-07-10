@@ -1,0 +1,134 @@
+# pixi environment for Visibility-Awared Mobile Grasping (ManiSkill simulation path).
+#
+# Goal: `pixi install` sets up the whole environment — Python + ML stack, ROS Noetic
+# (imported at module load by the robot code), the GPU/Vulkan libs, AND compiles the
+# three C/C++ modules the robot needs:
+#   - pytracik   (third_party/pytracik)  ROS-free TRAC-IK, pybind11 + CMake
+#   - vamp       (third_party/vamp)       whole-body motion planner, scikit-build + CMake
+#   - ikfast_fetch (this package)         analytic IK C++ extension (setuptools)
+# The two CMake modules are built by scikit-build-core, which pulls cmake+ninja from
+# PyPI (the "pip cmake"); their C/C++ deps (orocos-kdl, nlopt, eigen, boost) come from
+# this conda env. Real-robot / Gazebo paths are out of scope here.
+#
+# Manage this env ONLY through pixi (never system pip/conda).
+
+[workspace]
+name = "mobile_grasping_in_dynamic"
+version = "1.0.0"
+description = "Visibility-Aware Mobile Grasping — pixi env (ManiSkill + ROS Noetic + torch cu124)"
+channels = ["conda-forge", "robostack-noetic"]
+platforms = ["linux-64"]
+
+# ---------------------------------------------------------------------------
+# conda dependencies: python, ROS Noetic, C/C++ build toolchain, GPU/Vulkan libs
+# ---------------------------------------------------------------------------
+[dependencies]
+python = "3.11.*"
+pip = "*"
+setuptools = "*"
+wheel = "*"
+
+# numpy MUST stay < 2 (RoboStack cv_bridge / tf C-ABI).
+numpy = ">=1.26.4,<2"
+
+# newest libstdc++/libgcc so SAPIEN/torch manylinux_2_28 wheels load cleanly
+libstdcxx-ng = ">=13"
+libgcc-ng = ">=13"
+
+# cv2 for the perception code (conda build; do NOT also pip-install opencv-python).
+opencv = "*"
+
+# ---- ROS Noetic (RoboStack) — imported at module load via grasp_anywhere.robot.fetch ----
+"ros-noetic-rospy" = "*"
+"ros-noetic-tf" = "*"
+"ros-noetic-tf2-ros" = "*"
+"ros-noetic-actionlib" = "*"
+"ros-noetic-cv-bridge" = "*"
+"ros-noetic-sensor-msgs" = "*"
+"ros-noetic-std-msgs" = "*"
+"ros-noetic-geometry-msgs" = "*"
+"ros-noetic-nav-msgs" = "*"
+"ros-noetic-move-base-msgs" = "*"
+"ros-noetic-trajectory-msgs" = "*"
+"ros-noetic-control-msgs" = "*"
+rospkg = "*"
+
+# ---- C/C++ build toolchain for pytracik (pybind11/CMake) + vamp + ikfast ----
+cxx-compiler = "*"
+c-compiler = "*"
+cmake = ">=3.20"
+make = "*"
+ninja = "*"
+pkg-config = "*"
+pybind11 = "*"
+eigen = "*"
+libboost-devel = "*"
+orocos-kdl = "*"
+nlopt = "*"
+
+# ---- GPU rendering (SAPIEN uses Vulkan; NVIDIA ICD comes from the host driver) ----
+vulkan-tools = "*"
+libgl-devel = "*"
+
+# ---------------------------------------------------------------------------
+# PyPI dependencies. torch cu124 is pinned to its index so mani_skill/sapien do
+# not re-pull a CPU torch. pytracik / vamp build from the vendored source with the
+# pip cmake; the editable project build compiles ikfast_fetch against this env.
+# ---------------------------------------------------------------------------
+[pypi-options]
+extra-index-urls = ["https://download.pytorch.org/whl/cu124"]
+# Build the project without isolation so ikfast_fetch compiles against this env's
+# toolchain (and its declared deps are not re-resolved from scratch). pytracik and
+# vamp keep isolation so their CMake build uses the pip cmake, as intended.
+no-build-isolation = ["mobile_grasping_in_dynamic"]
+
+[pypi-dependencies]
+torch = { version = "==2.4.1", index = "https://download.pytorch.org/whl/cu124" }
+torchvision = { version = "==0.19.1", index = "https://download.pytorch.org/whl/cu124" }
+mani_skill = "*"
+pytorch-kinematics = "*"
+small-gicp = "*"
+open3d = "*"
+pyrender = "*"
+trimesh = "*"
+transformers = "*"
+flask = "*"
+requests = "*"
+rich = "*"
+h5py = "*"
+scipy = "*"
+Pillow = "*"
+pyyaml = "*"
+gymnasium = "*"
+tqdm = "*"
+scikit-learn = "*"
+openai = "*"
+pydub = "*"
+
+# The vendored C/C++ modules — compiled on `pixi install` (CMake via the pip cmake).
+pytracik = { path = "third_party/pytracik" }
+vamp = { path = "third_party/vamp" }
+# The project itself (editable) — compiles the ikfast_fetch C++ extension.
+mobile_grasping_in_dynamic = { path = ".", editable = true }
+
+# ---------------------------------------------------------------------------
+[activation.env]
+UV_HTTP_TIMEOUT = "600"
+# CMake finds the conda C/C++ deps (orocos-kdl, nlopt, eigen) via this prefix even
+# inside scikit-build-core's isolated build.
+CMAKE_PREFIX_PATH = "$CONDA_PREFIX"
+PKG_CONFIG_PATH = "$CONDA_PREFIX/lib/pkgconfig"
+# Force the host NVIDIA Vulkan ICD (conda's loader may not auto-find it).
+VK_ICD_FILENAMES = "/usr/share/vulkan/icd.d/nvidia_icd.json"
+# Keep ManiSkill assets in a known place + skip the interactive download prompt.
+MS_ASSET_DIR = "$HOME/.maniskill/data"
+MS_SKIP_ASSET_DOWNLOAD_PROMPT = "1"
+
+# ---------------------------------------------------------------------------
+[tasks]
+# Download the ManiSkill assets the example scenes need.
+download-assets = "python -m mani_skill.utils.download_asset -y ReplicaCAD && python -m mani_skill.utils.download_asset -y ycb"
+# Validate the full robot import path (Fetch + pytracik + ikfast + vamp) + an IK solve.
+smoke = "python tools/pixi/smoke.py"
+# The ManiSkill benchmark entry point (needs assets + the grasp service on :4003).
+run-benchmark = "python experiments/run_maniskill_benchmark.py --config grasp_anywhere/configs/maniskill_fetch.yaml --benchmark resources/grasp_benchmark.json"
