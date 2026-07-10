@@ -193,7 +193,7 @@ def process_single_scene(args):
                 0
             ]
 
-            builder = actors.get_actor_builder(sim_env.env.scene, id=f"ycb:{model_id}")
+            builder = actors.get_actor_builder(sim_env.env.unwrapped.scene, id=f"ycb:{model_id}")
             builder.initial_pose = sapien.Pose(p=position, q=orientation)
             actor_name = f"ycb_{model_id}_{uuid.uuid4().hex[:8]}"
             builder.build(name=actor_name)

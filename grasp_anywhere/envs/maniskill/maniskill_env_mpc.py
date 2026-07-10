@@ -956,7 +956,7 @@ class ManiSkillEnv(RobotEnv):
         with self._env_lock:
             target_actor = next(
                 a
-                for a in self.env.scene.get_all_actors()
+                for a in self.env.unwrapped.scene.get_all_actors()
                 if target_object_name in a.name
             )
         gripper_link = next(
