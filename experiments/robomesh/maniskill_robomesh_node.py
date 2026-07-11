@@ -5,7 +5,7 @@ Bridges the ManiSkill mobile-grasping scene to robomesh-node-server so a browser
 can (1) CLICK an object to grasp it and (2) type CHAT commands to change the view.
 
 RoboMesh contract (via robomesh-node-server/interfaces/ros_interface.py):
-  subscribes  /user_point       (geometry_msgs/Point32)  -- click, x,y normalized [0,1] (y up)
+  subscribes  /user_point       (geometry_msgs/Point32)  -- click, x,y normalized [0,1] (y down, 0=top)
   subscribes  /user_instruction (std_msgs/String)        -- chat text
   publishes   /robot_feedback   (std_msgs/String)        -- status; 'end' marks task done
   publishes   <image_topic>     (sensor_msgs/Image, rgb8)-- the streamed scene view
@@ -473,8 +473,12 @@ class ManiSkillRoboMeshNode:
         return float(uv[0]), float(uv[1])
 
     def _resolve_click_scene(self, x_norm, y_norm, max_dist_frac=0.12):
-        """scene mode: project each object center into render_camera, pick nearest to the click."""
-        u, v = x_norm * self._rc_w, (1.0 - y_norm) * self._rc_h
+        """scene mode: project each object center into render_camera, pick nearest to the click.
+
+        The click is normalized [0,1] with y DOWN (0 = top), matching the robomesh bridge and
+        image-pixel rows -- so it maps straight to render pixels with no vertical flip.
+        """
+        u, v = x_norm * self._rc_w, y_norm * self._rc_h
         best, bestd = None, 1e18
         for name, info in self.objects.items():
             uv = self._obj_pixel(info["actor"])
@@ -488,15 +492,15 @@ class ManiSkillRoboMeshNode:
         return best, self.objects[best]
 
     def _in_inset(self, x_norm, y_norm):
-        """True if a normalized click [0,1] (y up) falls on a HUD inset (not the main pane)."""
-        px, py = x_norm * self.stream_w, (1.0 - y_norm) * self.stream_h
+        """True if a normalized click [0,1] (y DOWN, 0 = top) falls on a HUD inset."""
+        px, py = x_norm * self.stream_w, y_norm * self.stream_h
         for ix, iy, iw, ih in self._inset_rects:
             if ix <= px <= ix + iw and iy <= py <= iy + ih:
                 return True
         return False
 
     def resolve_click(self, x_norm, y_norm):
-        """Normalized click [0,1] (y up) -> (name, info) of the clicked object, or (None, None).
+        """Normalized click [0,1] (y down, 0=top) -> (name, info) of the clicked object, or (None, None).
 
         Clicks map into the main third-person pane (the full canvas); clicks that land on a HUD
         inset are ignored so the user can't grasp something hidden behind a panel."""
