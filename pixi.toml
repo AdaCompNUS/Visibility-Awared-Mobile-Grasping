@@ -132,3 +132,8 @@ download-assets = "python -m mani_skill.utils.download_asset -y ReplicaCAD && py
 smoke = "python tools/pixi/smoke.py"
 # The ManiSkill benchmark entry point (needs assets + the grasp service on :4003).
 run-benchmark = "python experiments/run_maniskill_benchmark.py --config grasp_anywhere/configs/maniskill_fetch.yaml --benchmark resources/grasp_benchmark.json"
+# ROS master for the interactive RoboMesh demo.
+roscore = "roscore"
+# The interactive RoboMesh demo node (click-to-grasp + chat views). See
+# experiments/robomesh/README.md for the full local/browser setup.
+robomesh = "python experiments/robomesh/maniskill_robomesh_node.py"
