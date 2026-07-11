@@ -11,21 +11,24 @@ RoboMesh contract (via robomesh-node-server/interfaces/ros_interface.py):
   publishes   <image_topic>     (sensor_msgs/Image, rgb8)-- the streamed scene view
                                                             (feed to ros_to_ffmpeg.py)
 
-Streamed as a single composite HUD at a constant 960x720 (see experiments/robomesh/README.md):
+Streamed as a single composite HUD (default 960x720, --stream-width/-height; the main pane is
+rendered natively at that resolution -- crisp, not upscaled). See experiments/robomesh/README.md:
   - MAIN (full frame)   third-person view of the room -- the INTERACTIVE pane; click an object
-                        here to grasp it. Defaults to the tuned angled overview; chat
-                        left/right/up/down + zoom orbit it, 'top down' makes it overhead.
+                        to SELECT it, then say 'grasp it'. Defaults to the tuned angled overview;
+                        chat left/right/up/down + zoom orbit it, 'top down' makes it overhead.
   - TOP-RIGHT inset     the robot's first-person head camera (fetch_head) -- what it sees.
   - BOTTOM-RIGHT inset  the collision map the planner plans against
                         (robot.scene.current_environment()), height-colored, rendered from the
                         SAME pose as the main pane -- what the robot currently knows (live).
-Click -> object: the click is mapped into the main third-person pane and matched to the nearest
-projected object center (clicks on the HUD insets are ignored). After every grasp the scene
-auto-resets to a clean state.
+Click -> SELECT: a click on the main pane selects the nearest object (ringed with a marker); it
+does NOT start a grasp. Say "grasp it" / "pick it" (or press the RoboMesh grasp button, which
+sends that chat text) to grasp the selected object; "grasp <object>" also works by name. Clicks
+on the HUD insets are ignored. After every grasp the scene auto-resets (objects + robot) but
+KEEPS the current camera view.
 
 Run (needs roscore + the Contact-GraspNet server on :4003):
   pixi run python experiments/robomesh/maniskill_robomesh_node.py
-Local self-test (no ROS; builds scene, saves the four view frames, grasps one object):
+Local self-test (no ROS; builds scene, saves the composite HUD frames, grasps one object):
   pixi run python experiments/robomesh/maniskill_robomesh_node.py --selftest
 """
 import argparse
@@ -84,6 +87,7 @@ PANE_COLORS = [
     (80, 200, 255),
     (255, 170, 70),
 ]  # cyan = first person, amber = collision map
+SELECT_COLOR = (60, 255, 120)  # marker drawn on the click-selected object
 
 
 class ManiSkillRoboMeshNode:
@@ -101,6 +105,9 @@ class ManiSkillRoboMeshNode:
         max_attempts=5,
     ):
         self.image_topic = image_topic
+        # The third-person main pane is rendered at the stream resolution natively (the
+        # render_camera is sized to match, see _build_scene), so it is crisp at 960x720 rather
+        # than upscaled from ManiSkill's small default -- a resolution win with no extra bandwidth.
         self.stream_w, self.stream_h, self.fps = stream_w, stream_h, fps
         self.head_w, self.head_h = head_w, head_h
         # Every scene_0 object is >0.96 m from the robot spawn, so EVERY grasp needs the mobile
@@ -138,6 +145,11 @@ class ManiSkillRoboMeshNode:
             ),  # point cloud
         ]
 
+        # click-selected target: a click SELECTS the object under it; the actual grasp is
+        # triggered separately by a "grasp it" / "pick it" chat command (or the RoboMesh
+        # grasp button, which sends the same chat text). None = nothing selected.
+        self._selected = None  # (name, info) or None
+
         # --- grasp concurrency (only one grasp at a time) ---
         self._busy = threading.Lock()
 
@@ -152,10 +164,10 @@ class ManiSkillRoboMeshNode:
         scene_data = benchmark[scene_id]
         seed = int(scene_data.get("seed", 0))
         self._seed = seed
-        tasks = scene_data["grasp_tasks"][:num_objects]
+        self._tasks = scene_data["grasp_tasks"][:num_objects]
 
         log.info(
-            f"[robomesh] building scene {scene_id} (seed={seed}) with {len(tasks)} objects"
+            f"[robomesh] building scene {scene_id} (seed={seed}) with {len(self._tasks)} objects"
         )
         self.sim_env = ManiSkillEnv(
             env_id="ReplicaCAD_SceneManipulation-v1",
@@ -164,38 +176,20 @@ class ManiSkillRoboMeshNode:
             camera_width=self.head_w,
             camera_height=self.head_h,  # first-person head cam res
             camera_fov=self.head_fov,  # realistic FOV (see __init__)
+            # render the third-person main pane at the stream resolution (no upscaling)
+            render_camera_size=(self.stream_w, self.stream_h),
         )
         self.sim_env.reset(seed=seed)
         self.scene = self.sim_env.env.unwrapped.scene
 
-        # place the objects (same pattern as run_maniskill_benchmark.process_single_scene)
-        self.objects = {}  # actor_name -> {"actor", "model_id"}
-        self._segid_to_name = (
-            {}
-        )  # head-cam GT segmentation id -> actor_name (first-person click)
-        positions = []
-        for t in tasks:
-            model_id = t["model_id"]
-            pos = np.asarray(t["position"], dtype=np.float32).reshape(-1, 3)[0]
-            quat = np.asarray(t["orientation"], dtype=np.float32).reshape(-1, 4)[0]
-            builder = actors.get_actor_builder(self.scene, id=f"ycb:{model_id}")
-            builder.initial_pose = sapien.Pose(p=pos, q=quat)
-            name = f"ycb_{model_id}_{uuid.uuid4().hex[:8]}"
-            actor = builder.build(name=name)
-            self.objects[name] = {
-                "actor": actor,
-                "model_id": model_id,
-                "init_pose": (pos.copy(), quat.copy()),
-            }
-            try:
-                self._segid_to_name[int(actor._objs[0].per_scene_id)] = name
-            except (
-                Exception
-            ):  # noqa: BLE001  (segmentation-picking falls back to projection)
-                pass
-            positions.append(pos)
+        # place the objects (rebuilt after every reset -- see _spawn_objects / reset_scene)
+        self._spawn_objects()
 
         # orbit target = centroid of the objects
+        positions = [
+            np.asarray(t["position"], dtype=np.float32).reshape(-1, 3)[0]
+            for t in self._tasks
+        ]
         pos_arr = np.asarray(positions) if positions else np.array([[0, 0, 0.7]])
         self.view_target = np.mean(pos_arr, axis=0)
         self.view_target[2] = max(0.5, float(self.view_target[2]))
@@ -241,6 +235,30 @@ class ManiSkillRoboMeshNode:
             f"[robomesh] scene ready. render_camera width={self._rc_w}. objects: "
             f"{[o['model_id'] for o in self.objects.values()]}"
         )
+
+    def _spawn_objects(self):
+        """(Re)build the YCB objects on the CURRENT live scene and (re)populate the name/seg
+        maps. env.reset() drops actors added after construction, so this runs at build time AND
+        after every reset to keep the objects in the scene."""
+        self.objects = {}  # actor_name -> {"actor", "model_id", "init_pose"}
+        self._segid_to_name = {}  # head-cam GT segmentation id -> actor_name
+        for t in self._tasks:
+            model_id = t["model_id"]
+            pos = np.asarray(t["position"], dtype=np.float32).reshape(-1, 3)[0]
+            quat = np.asarray(t["orientation"], dtype=np.float32).reshape(-1, 4)[0]
+            builder = actors.get_actor_builder(self.scene, id=f"ycb:{model_id}")
+            builder.initial_pose = sapien.Pose(p=pos, q=quat)
+            name = f"ycb_{model_id}_{uuid.uuid4().hex[:8]}"
+            actor = builder.build(name=name)
+            self.objects[name] = {
+                "actor": actor,
+                "model_id": model_id,
+                "init_pose": (pos.copy(), quat.copy()),
+            }
+            try:
+                self._segid_to_name[int(actor._objs[0].per_scene_id)] = name
+            except Exception:  # noqa: BLE001  (falls back to projection-based clicking)
+                pass
 
     # ------------------------------------------------------------------ render
     def _topdown_sapien_pose(self):
@@ -318,7 +336,26 @@ class ManiSkillRoboMeshNode:
             scene_native, params
         )  # same pose as the main pane
         main_rgb = self._resize(scene_native)  # -> full stream canvas
-        return self._compose(main_rgb, [self._head_rgb(), cloud_native])
+        marker = self._selected_marker(params)  # highlight the click-selected object
+        return self._compose(main_rgb, [self._head_rgb(), cloud_native], marker)
+
+    def _selected_marker(self, params):
+        """(sx, sy, model_id) of the click-selected object in stream pixels, or None."""
+        if not self._selected:
+            return None
+        _, info = self._selected
+        K = _np(params["intrinsic_cv"])
+        K = K[0] if K.ndim == 3 else K
+        ext = _np(params["extrinsic_cv"])
+        ext = ext[0] if ext.ndim == 3 else ext
+        pw = _np(info["actor"].pose.p).reshape(-1)[:3]
+        cam = ext[:3, :3] @ pw + ext[:3, 3]
+        if cam[2] <= 1e-6:
+            return None
+        uv = K @ (cam / cam[2])
+        sx = float(uv[0]) * self.stream_w / self._rc_w
+        sy = float(uv[1]) * self.stream_h / self._rc_h
+        return sx, sy, info["model_id"]
 
     def _head_rgb(self):
         """The robot's first-person head-camera RGB, cached so a momentary miss won't blank it."""
@@ -329,13 +366,25 @@ class ManiSkillRoboMeshNode:
             return self._last_head_rgb
         return np.zeros((self.head_h, self.head_w, 3), dtype=np.uint8)
 
-    def _compose(self, main_rgb, panes):
-        """Draw `panes` = [first_person_rgb, pointcloud_rgb] into the HUD insets over main_rgb."""
+    def _compose(self, main_rgb, panes, marker=None):
+        """Draw `panes` = [first_person_rgb, pointcloud_rgb] into the HUD insets over main_rgb;
+        if `marker` = (sx, sy, label) is set, ring the click-selected object first."""
         from PIL import Image as PILImage
         from PIL import ImageDraw
 
         canvas = PILImage.fromarray(np.ascontiguousarray(main_rgb))
         draw = ImageDraw.Draw(canvas)
+        if marker is not None:
+            sx, sy, mlabel = marker
+            r = 22
+            draw.ellipse(
+                [sx - r, sy - r, sx + r, sy + r], outline=SELECT_COLOR, width=3
+            )
+            draw.line([sx - r - 7, sy, sx + r + 7, sy], fill=SELECT_COLOR, width=1)
+            draw.line([sx, sy - r - 7, sx, sy + r + 7], fill=SELECT_COLOR, width=1)
+            draw.text(
+                (sx + r + 5, sy - r), f"{mlabel}  (say 'grasp it')", fill=SELECT_COLOR
+            )
         for img, (x0, y0, w, h), label, color in zip(
             panes, self._inset_rects, PANE_LABELS, PANE_COLORS
         ):
@@ -488,30 +537,25 @@ class ManiSkillRoboMeshNode:
             self._feedback("end")
             self._busy.release()
 
-    def reset_scene(self, reset_view=True):
+    def reset_scene(self):
         """Return the sim to its start state: release the held object, robot home, objects
-        back to their initial poses, clear the perceived collision map. Then reset the main pane
-        to the angled overview so the user can pick the next object."""
+        back to their initial poses, clear the perceived collision map. The camera view is
+        left UNCHANGED — the demo keeps the same scene and view the user was on."""
         self._feedback("Resetting ...")
         try:
             try:
                 self.robot.detach_objects_from_eef()  # drop the planning attachment
             except Exception:  # noqa: BLE001
                 pass
-            # reset robot (home) + episode state
+            # reset robot (home) + episode state. env.reset() rebuilds the scene from the env's
+            # registered actors, which DROPS our dynamically-spawned YCB objects and re-poses/
+            # recreates the render camera. So we re-capture the live scene + camera and RE-SPAWN
+            # the objects at their initial poses; the camera view (main_view) is left unchanged.
             self.sim_env.reset(seed=self._seed)
-            # restore each object to its initial pose (belt-and-suspenders; zero velocity)
+            self.scene = self.sim_env.env.unwrapped.scene
+            self._rc = self.scene.human_render_cameras["render_camera"]
             with self.sim_env._env_lock:
-                for o in self.objects.values():
-                    pos, quat = o["init_pose"]
-                    try:
-                        o["actor"].set_pose(sapien.Pose(p=pos, q=quat))
-                        for setter in ("set_linear_velocity", "set_angular_velocity"):
-                            fn = getattr(o["actor"], setter, None)
-                            if fn is not None:
-                                fn(np.zeros(3, dtype=np.float32))
-                    except Exception:  # noqa: BLE001
-                        pass
+                self._spawn_objects()  # env.reset dropped them; rebuild at their initial poses
                 self.scene.update_render()
             self.robot.clear_pointclouds()  # clear the VAMP planning cloud
             try:
@@ -521,12 +565,9 @@ class ManiSkillRoboMeshNode:
             log.info("[robomesh] scene reset to initial state")
         except Exception as e:  # noqa: BLE001
             log.error(f"[robomesh] reset_scene failed: {e}")
-        # reset the main pane to the angled overview + default orbit params
-        if reset_view:
-            self.main_view = "scene"
-            self._scene_sub = "tuned"
-            self.view_yaw, self.view_pitch, self.view_radius = self._default_view
-        self._feedback("Ready — pick the next object.")
+        # keep the current camera view; just clear the click selection for the next pick
+        self._selected = None
+        self._feedback("Ready — click an object, then say 'grasp it'.")
 
     # ------------------------------------------------------------------ chat
     def handle_instruction(self, text):
@@ -642,19 +683,24 @@ class ManiSkillRoboMeshNode:
             self._scene_sub = "orbit"
             self.view_radius += dr
             self._feedback("Zoomed out.")
-        elif t.startswith("grasp") or t.startswith("pick"):
-            target = self._find_object_by_name(t)
+        elif t.startswith(("grasp", "pick", "grab", "take")):
+            # "grasp <object>" targets that object by name; a bare "grasp it" / "pick it"
+            # (or the RoboMesh grasp button) grasps the currently click-selected object.
+            target = self._find_object_by_name(t) or self._selected
             if target is None:
-                self._feedback("I couldn't find that object. Try clicking it.")
+                self._feedback(
+                    "Click an object first to select it, then say 'grasp it'."
+                )
             else:
                 threading.Thread(
                     target=self.grasp_object, args=target, daemon=True
                 ).start()
         else:
             self._feedback(
-                "Commands: 'scene view' / 'top down' to frame the main view, "
-                "left/right/up/down + zoom in/out to orbit it, 'grasp <object>' or "
-                "click an object to grasp it, 'reset' to start over."
+                "Sorry, that's not something this demo can do — it's a mobile-grasping scene, "
+                "not a general chat assistant. You can: click an object to select it and say "
+                "'grasp it' (or 'grasp <object>') to pick it up; 'scene view' / 'top down' to "
+                "reframe the view; left/right/up/down or zoom in/out to move it; 'reset' to start over."
             )
 
     def _find_object_by_name(self, text):
@@ -673,13 +719,19 @@ class ManiSkillRoboMeshNode:
         log.info(f"[robomesh feedback] {text}")
 
     def _on_point(self, msg):
+        # A click only SELECTS the object under it; it does NOT start a grasp. The grasp is
+        # triggered by a "grasp it" / "pick it" chat command (or the RoboMesh grasp button,
+        # which sends that chat text).
         name, info = self.resolve_click(float(msg.x), float(msg.y))
         if name is None:
-            self._feedback("No object at that spot — click directly on an object.")
+            self._feedback(
+                "No object there — click directly on an object to select it."
+            )
             return
-        threading.Thread(
-            target=self.grasp_object, args=(name, info), daemon=True
-        ).start()
+        self._selected = (name, info)
+        self._feedback(
+            f"Selected the {info['model_id']}. Say 'grasp it' (or press the grasp button) to pick it up."
+        )
 
     def _on_instruction(self, msg):
         self.handle_instruction(msg.data)
@@ -739,6 +791,12 @@ class ManiSkillRoboMeshNode:
         self.main_view = "scene"
         self._scene_sub = "tuned"
 
+        # simulate a click-selection to verify the selection marker renders on the main pane
+        self._selected = next(iter(self.objects.items()))
+        save("composite_selected")
+        print(f"[selftest] selected marker on {self._selected[1]['model_id']}")
+        self._selected = None
+
         kp = self._known_points()
         print(f"[selftest] pointcloud map: {0 if kp is None else len(kp)} known points")
 
@@ -773,6 +831,16 @@ def main():
     ap.add_argument("--num-objects", type=int, default=6)
     ap.add_argument("--image-topic", default="/maniskill/scene/image_raw")
     ap.add_argument(
+        "--stream-width",
+        type=int,
+        default=960,
+        help="streamed HUD width; the third-person main pane renders natively at this size "
+        "(higher = sharper but more GPU/WebRTC bandwidth -- 1280 streamed noticeably slower)",
+    )
+    ap.add_argument(
+        "--stream-height", type=int, default=720, help="streamed HUD height"
+    )
+    ap.add_argument(
         "--max-attempts",
         type=int,
         default=5,
@@ -795,6 +863,8 @@ def main():
         scene_id=args.scene,
         num_objects=args.num_objects,
         image_topic=args.image_topic,
+        stream_w=args.stream_width,
+        stream_h=args.stream_height,
         max_attempts=args.max_attempts,
     )
     if args.selftest:

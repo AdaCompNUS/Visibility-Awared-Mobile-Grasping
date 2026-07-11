@@ -38,6 +38,7 @@ class ManiSkillEnv(RobotEnv):
         camera_width: int = 640,
         camera_height: int = 480,
         camera_fov: Optional[float] = None,
+        render_camera_size: Optional[Tuple[int, int]] = None,
     ):
         # Force joint velocity control by default (caller may override if needed)
         self.control_mode = control_mode
@@ -48,6 +49,14 @@ class ManiSkillEnv(RobotEnv):
         sensor_configs = {"width": camera_width, "height": camera_height}
         if camera_fov is not None:
             sensor_configs["fov"] = camera_fov
+        # `render_camera_size` (w, h) sets the third-person human render_camera resolution
+        # (used by the RoboMesh demo's main view); None keeps ManiSkill's default.
+        render_kwargs = {}
+        if render_camera_size is not None:
+            render_kwargs["human_render_camera_configs"] = {
+                "width": int(render_camera_size[0]),
+                "height": int(render_camera_size[1]),
+            }
         self.env = gym.make(
             env_id,
             robot_uids=robot_uids,
@@ -55,6 +64,7 @@ class ManiSkillEnv(RobotEnv):
             control_mode=control_mode,
             render_mode=render_mode,
             sensor_configs=sensor_configs,
+            **render_kwargs,
             sim_config=SimConfig(
                 gpu_memory_config=GPUMemoryConfig(
                     found_lost_pairs_capacity=2**25, max_rigid_patch_count=2**18

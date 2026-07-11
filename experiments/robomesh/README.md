@@ -2,7 +2,7 @@
 
 Wraps the ManiSkill mobile-grasping scene as a backend "node" for
 [robomesh-node-server](https://github.com/NUS-SSI/robomesh-node-server), so a browser user
-can **click an object to grasp it** and **type chat commands to change the view**.
+can **click an object to select it** (then say *"grasp it"*) and **type chat commands to change the view**.
 
 ## How it maps to robomesh
 
@@ -10,21 +10,26 @@ robomesh delivers two browser→backend events (see its `core/webrtc/messaging.g
 Flask bridge (`interfaces/ros_interface.py`) turns into ROS topics:
 | browser action | robomesh | ROS topic | what our node does |
 |---|---|---|---|
-| **click** on the video | `/point` | `/user_point` (x,y ∈ [0,1]) | resolve the object under the click → grasp it |
-| **chat** text | `/chat` | `/user_instruction` (String) | switch view, orbit, or `grasp <object>` (see below) |
+| **click** on the video | `/point` | `/user_point` (x,y ∈ [0,1]) | **select** the object under the click (ring marker); does NOT grasp |
+| **chat** text (typed or the **grasp button**) | `/chat` | `/user_instruction` (String) | `grasp it` / `pick it` grasps the selected object; also switch view, orbit, `grasp <object>` |
 | — | — | `/robot_feedback` (String) | status messages (`'end'` = task done) |
 | video | RTP :5004 | `sensor_msgs/Image` | our node publishes the composite HUD; `ros_to_ffmpeg.py` streams it |
 
 The node: `experiments/robomesh/maniskill_robomesh_node.py`.
 
 ### Layout (composite HUD)
-The stream is a single **composite** at a constant 960×720 — all three panes in every frame:
-- **MAIN (full frame)** — a third-person view of the room; this is the **interactive** pane, so
-  **click an object here to grasp it**. It defaults to a tuned **angled overview**; chat
-  `scene view` / `overview` returns to it, and `left/right/up/down` + `zoom in/out` **orbit** it
-  around the object centroid. `top down` / `overhead` reframes the main pane straight down (every
-  object visible — best for freely picking any object). Clicks project object centers into this
-  camera and pick the nearest.
+The stream is a single **composite**, by default **960×720** (`--stream-width`/`--stream-height`);
+the main pane is rendered **natively at that resolution** (the `render_camera` is sized to match, so
+it is crisp rather than upscaled from ManiSkill's small default — sharper than before at the same
+bandwidth). Raising it (e.g. 1280×960) is sharper still but streams noticeably slower over WebRTC.
+All three panes appear in every frame:
+- **MAIN (full frame)** — a third-person view of the room; this is the **interactive** pane. Click
+  an object to **select** it (a green ring + label appear on it); the click does **not** start a
+  grasp — say `grasp it` / `pick it` (or press the grasp button) to pick the selected object. It
+  defaults to a tuned **angled overview**; chat `scene view` / `overview` returns to it, and
+  `left/right/up/down` + `zoom in/out` **orbit** it around the object centroid. `top down` /
+  `overhead` reframes the main pane straight down (every object visible). Clicks project object
+  centers into this camera and pick the nearest.
 - **TOP-RIGHT inset — `ROBOT VIEW`** — the robot's onboard **head camera** (`fetch_head`): what it
   actually sees, so you can watch a grasp up close.
 - **BOTTOM-RIGHT inset — `WHAT THE ROBOT KNOWS`** — the collision cloud the planner actually plans
@@ -40,10 +45,11 @@ land on a HUD inset are **ignored**, so you can't accidentally grasp something h
 ### Auto-reset after each grasp
 After **every** grasp finishes (success or failure), the node automatically resets: it releases
 the held object, sends the robot home, restores every object to its initial pose, clears the
-perceived collision map back to the static baseline, and reframes the main pane to the **angled
-overview** so you can immediately pick the next object. Chat `reset` / `start over` triggers the
-same reset manually (queued until the current grasp finishes); `reset view` only reframes the
-main pane. `render_frame` never raises — a failure falls back to the last good frame instead of
+perceived collision map back to the static baseline, and clears the click selection. The **camera
+view is left unchanged** — the demo stays on the same scene and view so you can immediately pick
+the next object. Chat `reset` / `start over` triggers the same reset manually (queued until the
+current grasp finishes); `reset view` explicitly reframes the main pane to the angled overview.
+`render_frame` never raises — a failure falls back to the last good frame instead of
 freezing the stream.
 
 ## Quick self-test (no ROS)
@@ -77,7 +83,8 @@ pixi run python ../robomesh-node-server/interfaces/ros_interface.py
 
 # 5) simulate the browser (instead of the Go server / webapp):
 bash experiments/robomesh/simulate.sh chat  "top down"
-bash experiments/robomesh/simulate.sh point 0.5 0.5     # click center -> grasp nearest object
+bash experiments/robomesh/simulate.sh point 0.5 0.5     # click center -> SELECT nearest object
+bash experiments/robomesh/simulate.sh chat  "grasp it"  # then grasp the selected object
 # check the video topic is live:
 pixi run rostopic hz /maniskill/scene/image_raw
 ```
