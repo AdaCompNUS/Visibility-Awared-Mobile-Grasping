@@ -1,10 +1,8 @@
 # Visibility-Awared Mobile Grasping in Dynamic Environments
 
-> ### 📰 News
-> **🎉 Our live demo is now on [RoboMesh](https://robomesh.ssilabs.org/webapp/)!**
-> Drive the mobile-grasping robot **right in your browser** — click an object, say _"grasp it,"_ and
-> watch it navigate, perceive, and pick in real time. No install required.
-> **→ [Try it online](https://robomesh.ssilabs.org/webapp/)**
+### 📰 News — 🎉 Our live demo is now on [RoboMesh](https://robomesh.ssilabs.org/webapp/)!
+
+Drive the mobile-grasping robot **right in your browser** — click an object, say _"grasp it,"_ and watch it navigate, perceive, and pick in real time. No install required. **→ [Try it online](https://robomesh.ssilabs.org/webapp/)**
 
 > **Paper:** *Visibility-Aware Mobile Grasping in Dynamic Environments*
 >
