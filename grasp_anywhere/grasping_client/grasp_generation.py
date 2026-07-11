@@ -177,20 +177,20 @@ def predict_grasps(
         pred_grasps_cam: (K, 4, 4) Grasps in camera frame.
         scores: (K,) Scores for each grasp.
     """
-    try:
-        if config.mode == GraspingMode.DEPTH_SEGMENTATION:
-            return _predict_grasps_depth_segmentation(config, rgb, depth, segmap, K)
+    # No fallback: a failed service call (network error / HTTP 500) MUST raise, not silently
+    # return None -- which the scheduler would report as PERCEPTION_FAILURE, hiding the real
+    # error. Only a genuine empty prediction (200 OK with 0 grasps) returns empty arrays, which
+    # is the sole legitimate PERCEPTION_FAILURE.
+    if config.mode == GraspingMode.DEPTH_SEGMENTATION:
+        return _predict_grasps_depth_segmentation(config, rgb, depth, segmap, K)
 
-        elif config.mode == GraspingMode.POINTCLOUD_SEGMENTATION:
-            return _predict_grasps_pointcloud_segmentation(config, full_pc, segment_pc)
+    elif config.mode == GraspingMode.POINTCLOUD_SEGMENTATION:
+        return _predict_grasps_pointcloud_segmentation(config, full_pc, segment_pc)
 
-        elif config.mode == GraspingMode.POINTCLOUD_ZOOM_SEGMENTATION:
-            return _predict_grasps_pointcloud_zoom_segmentation(
-                config, full_pc, segment_pc, visualize
-            )
+    elif config.mode == GraspingMode.POINTCLOUD_ZOOM_SEGMENTATION:
+        return _predict_grasps_pointcloud_zoom_segmentation(
+            config, full_pc, segment_pc, visualize
+        )
 
-        else:
-            raise ValueError(f"Unknown grasping mode: {config.mode}")
-    except requests.exceptions.RequestException as e:
-        log.error(f"Grasp prediction service call failed: {e}")
-        return None, None
+    else:
+        raise ValueError(f"Unknown grasping mode: {config.mode}")
