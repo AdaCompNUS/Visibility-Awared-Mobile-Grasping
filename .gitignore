@@ -54,6 +54,7 @@ resources/benchmark/
 *.log
 grasp_info.npz
 camera_pose.json
+*.sdp          # RTP session descriptor emitted by the RoboMesh video stream
 .codex
 rebuttal/
 

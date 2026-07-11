@@ -1,5 +1,11 @@
 # Visibility-Awared Mobile Grasping in Dynamic Environments
 
+> ### 📰 News
+> **🎉 Our live demo is now on [RoboMesh](https://robomesh.ssilabs.org/webapp/)!**
+> Drive the mobile-grasping robot **right in your browser** — click an object, say _"grasp it,"_ and
+> watch it navigate, perceive, and pick in real time. No install required.
+> **→ [Try it online](https://robomesh.ssilabs.org/webapp/)**
+
 > **Paper:** *Visibility-Aware Mobile Grasping in Dynamic Environments*
 >
 > This repository contains the code for our visibility-aware mobile grasping framework that enables a Fetch robot to grasp objects in cluttered, dynamic environments by jointly reasoning about base placement, arm planning, and active perception.
