@@ -1,0 +1,2341 @@
+{
+ "_meta": {
+  "purpose": "Curated pool of reliably-graspable YCB objects for the RoboMesh demo (experiments/robomesh/maniskill_robomesh_node.py). On every reset the node samples 6 entries at random from `objects` (rejection-sampled against min_separation_m) and spawns them via _spawn_objects().",
+  "generated": "2026-07-16",
+  "build_seed": 7,
+  "scene_id": "scene_7",
+  "seed_note": "The apartment layout is a deterministic function of the episode seed: SceneManipulationEnv sets reconfiguration_freq=1 when num_envs==1 (mani_skill/envs/scenes/base_env.py:61-63), so EVERY reset() reconfigures and re-runs scene_builder.sample_build_config_idxs(), which is seeded by torch.manual_seed(episode_seed) (sapien_env.py:911-912). The node MUST build with seed 7.",
+  "apartment_fingerprint": "76e7111fb151",
+  "apartment_note": "md5 over every static actor name + world pose. Seeds 7, 8, 11, 12, 14 and 17 all produce this identical ReplicaCAD build config, so the grasp_task positions of those six benchmark scenes are interchangeable within it. Fetch spawns at (-1, 0, 0.02) in every build config, so there is no robot-spawn confound. The apartment itself contains no graspable objects; every object here comes from a benchmark grasp_task.",
+  "source_scenes": [
+   "scene_7",
+   "scene_8",
+   "scene_11",
+   "scene_12",
+   "scene_14",
+   "scene_17"
+  ],
+  "source_result_files": [
+   "benchmark_results_20260107_064920.json",
+   "benchmark_results_20260130_164317.json",
+   "run_20260201_042444/benchmark_results.json",
+   "run_20260201_135616/benchmark_results.json",
+   "run_20260203_005709/benchmark_results.json"
+  ],
+  "source_orientation_file": "resources/grasp_benchmark.json (the ONLY source of orientation)",
+  "n_source_experiments": 120,
+  "reliability_criterion": "a run PASSES iff (success AND hold_success AND NOT collision_detected); tier = how many of the 5 independent benchmark runs passed; pool rule: tier >= 4/5",
+  "tier_counts_before_filtering": {
+   "5/5": 37,
+   "4/5": 29,
+   "total_ge_4of5": 66,
+   "distinct_models": 38
+  },
+  "visibility_filter": {
+   "rule": "keep only tasks that are actually clickable in the tuned overview camera: in_frame AND unoccluded (ground-truth segmentation, each object rendered solo at its settled pose) AND clear of the two 300x225 HUD insets (the node drops clicks landing on an inset, _in_inset/resolve_click).",
+   "overview_camera_p": [
+    4.271290569202822,
+    1.6424852140115007,
+    4.743860698552588
+   ],
+   "overview_camera_q": [
+    0.39639514684677124,
+    0.34094130992889404,
+    0.16146793961524963,
+    -0.8369933366775513
+   ],
+   "render_camera": "960x720, fovy 1.0 rad, fx=fy=658.98, cx=480, cy=360",
+   "n_dropped": 7,
+   "result": "59 of the 66 tasks at >=4/5 are in-frame, unoccluded and clear of the insets under this pose. A solo-render pass removed the 7 tasks hidden by apartment geometry; the pool is only valid for THIS camera pose.",
+   "dropped": [
+    "scene_7/t2:065-i_cups",
+    "scene_7/t11:073-f_lego_duplo",
+    "scene_11/t19:057_racquetball",
+    "scene_12/t19:015_peach",
+    "scene_14/t4:025_mug",
+    "scene_14/t9:061_foam_brick",
+    "scene_14/t14:058_golf_ball"
+   ]
+  },
+  "per_model_cap": {
+   "cap": 4,
+   "rule": "at most 4 entries per model_id so a random draw of 6 stays varied; within a model, 5/5 entries are kept in preference to 4/5",
+   "n_dropped": 1,
+   "dropped": [
+    {
+     "scene": "scene_8",
+     "task_id": 15,
+     "model_id": "070-a_colored_wood_blocks",
+     "tier": "4/5"
+    }
+   ]
+  },
+  "click_note": "The node resolves a click by NEAREST projected object centre within 0.12*960 = 115 px (_resolve_click_scene), not by segmentation, so an object being only a few pixels wide does not make it unselectable -- the user clicks near it. 28 of the 58 entries render smaller than 60 px in this overview; they are kept deliberately for that reason. The closest co-spawnable projected centres are 19.4 px apart, so closely grouped objects require clicking near the desired centre.",
+  "pool_size": 58,
+  "distinct_models": 34,
+  "tier_counts_in_pool": {
+   "5/5": 34,
+   "4/5": 24
+  },
+  "models": [
+   "002_master_chef_can",
+   "005_tomato_soup_can",
+   "006_mustard_bottle",
+   "007_tuna_fish_can",
+   "010_potted_meat_can",
+   "012_strawberry",
+   "013_apple",
+   "014_lemon",
+   "016_pear",
+   "018_plum",
+   "021_bleach_cleanser",
+   "024_bowl",
+   "035_power_drill",
+   "044_flat_screwdriver",
+   "050_medium_clamp",
+   "052_extra_large_clamp",
+   "053_mini_soccer_ball",
+   "054_softball",
+   "057_racquetball",
+   "061_foam_brick",
+   "063-a_marbles",
+   "065-a_cups",
+   "065-b_cups",
+   "065-c_cups",
+   "065-e_cups",
+   "065-f_cups",
+   "065-h_cups",
+   "065-j_cups",
+   "070-a_colored_wood_blocks",
+   "072-c_toy_airplane",
+   "073-a_lego_duplo",
+   "073-b_lego_duplo",
+   "073-e_lego_duplo",
+   "073-f_lego_duplo"
+  ],
+  "entry_fields": {
+   "model_id/position/orientation": "exactly what _spawn_objects() needs; orientation is a SAPIEN quaternion (w,x,y,z), same order as grasp_benchmark.json",
+   "scene/task_id": "provenance: the benchmark experiment this entry came from",
+   "tier/n_success/n_runs": "reliability across the 5 independent benchmark runs",
+   "failure_reason": "for 4/5 entries, why the single failed run failed; null for 5/5",
+   "uv_overview": "pixel of the object's centre in the 960x720 tuned overview (audit aid)",
+   "visible_pixels": "pixels the object occupies in that overview when rendered solo",
+   "bounding_radius_m": "bounding-sphere radius about the spawn origin, from the real YCB collision.ply with ManiSkill's per-model scale"
+  },
+  "sampling": {
+   "draw": 6,
+   "constraint": "reject any draw in which two chosen entries are closer than min_separation_m (they would interpenetrate when co-spawned)",
+   "naive_single_try_acceptance": "34.0%",
+   "mean_tries_to_accept": 2.91,
+   "mean_distinct_models_per_draw": 5.68
+  }
+ },
+ "min_separation_m": 0.3,
+ "min_separation_derivation": {
+  "why": "Each benchmark task was run with ONE object in the scene, so their positions were never required to be mutually compatible. Co-spawning 6 of them CAN interpenetrate: the two closest entries in this pool are 0.034 m apart.",
+  "method": "Two objects can only interpenetrate if their centres are closer than r_i + r_j, where r is the bounding-sphere radius about the actor origin (= the spawn position). Because the sphere is centred on the origin, this bound holds for ANY spawn orientation. Radii were measured from the real YCB collision.ply with ManiSkill's own per-model scale (mani_skill/utils/building/actors/ycb.py:26-27).",
+  "largest_radius_m": 0.1368,
+  "largest_radius_model": "021_bleach_cleanser",
+  "worst_case_radius_sum_m": 0.2658,
+  "conclusion": "min_separation_m = 0.3 exceeds the worst-case r_i+r_j of 0.266 m, so it PROVABLY prevents interpenetration for every pair in this pool (margin 0.034 m), while still leaving 93.5% of pairs legal and accepting a 6-draw on the first try 34% of the time.",
+  "min_pairwise_distance_m": 0.0336,
+  "n_pairs_closer_than_min_separation": 108,
+  "n_pairs_that_would_actually_overlap": 23,
+  "pairs_closer_than_min_separation": [
+   {
+    "a": "scene_17/t5:002_master_chef_can",
+    "b": "scene_12/t2:053_mini_soccer_ball",
+    "distance_m": 0.0336,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_14/t5:005_tomato_soup_can",
+    "b": "scene_7/t7:073-e_lego_duplo",
+    "distance_m": 0.0362,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_8/t13:002_master_chef_can",
+    "b": "scene_12/t10:073-e_lego_duplo",
+    "distance_m": 0.0469,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_7/t18:053_mini_soccer_ball",
+    "b": "scene_12/t16:073-b_lego_duplo",
+    "distance_m": 0.0477,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_14/t10:061_foam_brick",
+    "b": "scene_17/t12:073-a_lego_duplo",
+    "distance_m": 0.0511,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_12/t12:065-b_cups",
+    "b": "scene_8/t7:065-h_cups",
+    "distance_m": 0.0516,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_7/t6:052_extra_large_clamp",
+    "b": "scene_17/t19:070-a_colored_wood_blocks",
+    "distance_m": 0.0527,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_7/t6:052_extra_large_clamp",
+    "b": "scene_12/t10:073-e_lego_duplo",
+    "distance_m": 0.0665,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_14/t15:065-h_cups",
+    "b": "scene_11/t18:065-j_cups",
+    "distance_m": 0.0687,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_11/t1:007_tuna_fish_can",
+    "b": "scene_7/t10:065-a_cups",
+    "distance_m": 0.0722,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_14/t17:013_apple",
+    "b": "scene_8/t0:070-a_colored_wood_blocks",
+    "distance_m": 0.0741,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_11/t13:024_bowl",
+    "b": "scene_14/t19:065-e_cups",
+    "distance_m": 0.0826,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_14/t19:065-e_cups",
+    "b": "scene_12/t0:065-f_cups",
+    "distance_m": 0.0827,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_12/t1:007_tuna_fish_can",
+    "b": "scene_14/t17:013_apple",
+    "distance_m": 0.0847,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t18:053_mini_soccer_ball",
+    "b": "scene_11/t10:073-f_lego_duplo",
+    "distance_m": 0.0861,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t13:024_bowl",
+    "b": "scene_12/t0:065-f_cups",
+    "distance_m": 0.0923,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_12/t16:073-b_lego_duplo",
+    "b": "scene_11/t10:073-f_lego_duplo",
+    "distance_m": 0.0973,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t13:002_master_chef_can",
+    "b": "scene_7/t6:052_extra_large_clamp",
+    "distance_m": 0.1,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_17/t19:070-a_colored_wood_blocks",
+    "b": "scene_12/t10:073-e_lego_duplo",
+    "distance_m": 0.1006,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_8/t19:050_medium_clamp",
+    "b": "scene_14/t0:063-a_marbles",
+    "distance_m": 0.1015,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_14/t0:063-a_marbles",
+    "b": "scene_17/t2:065-c_cups",
+    "distance_m": 0.1024,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_17/t18:065-e_cups",
+    "b": "scene_11/t18:065-j_cups",
+    "distance_m": 0.1085,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_11/t17:035_power_drill",
+    "b": "scene_8/t8:063-a_marbles",
+    "distance_m": 0.1111,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_11/t11:006_mustard_bottle",
+    "b": "scene_8/t0:070-a_colored_wood_blocks",
+    "distance_m": 0.1129,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_8/t13:002_master_chef_can",
+    "b": "scene_17/t19:070-a_colored_wood_blocks",
+    "distance_m": 0.1145,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_8/t9:014_lemon",
+    "b": "scene_7/t7:073-e_lego_duplo",
+    "distance_m": 0.1146,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t1:007_tuna_fish_can",
+    "b": "scene_8/t0:070-a_colored_wood_blocks",
+    "distance_m": 0.1157,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_17/t18:065-e_cups",
+    "b": "scene_14/t15:065-h_cups",
+    "distance_m": 0.1217,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t10:065-a_cups",
+    "b": "scene_8/t0:070-a_colored_wood_blocks",
+    "distance_m": 0.1218,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t1:007_tuna_fish_can",
+    "b": "scene_8/t0:070-a_colored_wood_blocks",
+    "distance_m": 0.1229,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t4:065-h_cups",
+    "b": "scene_17/t12:073-a_lego_duplo",
+    "distance_m": 0.126,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t11:006_mustard_bottle",
+    "b": "scene_12/t1:007_tuna_fish_can",
+    "distance_m": 0.1333,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_14/t5:005_tomato_soup_can",
+    "b": "scene_8/t9:014_lemon",
+    "distance_m": 0.1377,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t19:054_softball",
+    "b": "scene_12/t8:070-a_colored_wood_blocks",
+    "distance_m": 0.1387,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t13:024_bowl",
+    "b": "scene_12/t2:053_mini_soccer_ball",
+    "distance_m": 0.1422,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t13:013_apple",
+    "b": "scene_17/t10:072-c_toy_airplane",
+    "distance_m": 0.1438,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t1:007_tuna_fish_can",
+    "b": "scene_14/t17:013_apple",
+    "distance_m": 0.1443,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t10:065-a_cups",
+    "b": "scene_11/t16:070-a_colored_wood_blocks",
+    "distance_m": 0.1468,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t13:063-a_marbles",
+    "b": "scene_11/t18:065-j_cups",
+    "distance_m": 0.1469,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t11:006_mustard_bottle",
+    "b": "scene_14/t17:013_apple",
+    "distance_m": 0.1512,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_17/t5:002_master_chef_can",
+    "b": "scene_11/t13:024_bowl",
+    "distance_m": 0.155,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t11:006_mustard_bottle",
+    "b": "scene_11/t10:073-f_lego_duplo",
+    "distance_m": 0.1672,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_17/t11:057_racquetball",
+    "b": "scene_12/t15:065-f_cups",
+    "distance_m": 0.1697,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t19:050_medium_clamp",
+    "b": "scene_11/t18:065-j_cups",
+    "distance_m": 0.1707,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t13:063-a_marbles",
+    "b": "scene_14/t15:065-h_cups",
+    "distance_m": 0.1722,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t9:014_lemon",
+    "b": "scene_7/t4:065-h_cups",
+    "distance_m": 0.1729,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_14/t10:061_foam_brick",
+    "b": "scene_7/t4:065-h_cups",
+    "distance_m": 0.1729,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_14/t17:013_apple",
+    "b": "scene_7/t10:065-a_cups",
+    "distance_m": 0.1751,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t13:013_apple",
+    "b": "scene_8/t6:021_bleach_cleanser",
+    "distance_m": 0.1799,
+    "bounding_spheres_overlap": true
+   },
+   {
+    "a": "scene_12/t8:070-a_colored_wood_blocks",
+    "b": "scene_17/t19:070-a_colored_wood_blocks",
+    "distance_m": 0.1823,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t16:070-a_colored_wood_blocks",
+    "b": "scene_8/t0:070-a_colored_wood_blocks",
+    "distance_m": 0.1864,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t0:012_strawberry",
+    "b": "scene_11/t10:073-f_lego_duplo",
+    "distance_m": 0.1885,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t19:050_medium_clamp",
+    "b": "scene_7/t13:063-a_marbles",
+    "distance_m": 0.1886,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t1:007_tuna_fish_can",
+    "b": "scene_12/t12:065-b_cups",
+    "distance_m": 0.1919,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t17:035_power_drill",
+    "b": "scene_14/t10:061_foam_brick",
+    "distance_m": 0.1953,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t11:006_mustard_bottle",
+    "b": "scene_7/t18:053_mini_soccer_ball",
+    "distance_m": 0.1975,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t11:006_mustard_bottle",
+    "b": "scene_11/t16:070-a_colored_wood_blocks",
+    "distance_m": 0.1977,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t19:050_medium_clamp",
+    "b": "scene_17/t2:065-c_cups",
+    "distance_m": 0.2026,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t17:035_power_drill",
+    "b": "scene_17/t12:073-a_lego_duplo",
+    "distance_m": 0.2042,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t11:006_mustard_bottle",
+    "b": "scene_17/t9:073-a_lego_duplo",
+    "distance_m": 0.2043,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t2:053_mini_soccer_ball",
+    "b": "scene_14/t19:065-e_cups",
+    "distance_m": 0.2079,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_14/t0:063-a_marbles",
+    "b": "scene_17/t18:065-e_cups",
+    "distance_m": 0.2082,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_14/t0:063-a_marbles",
+    "b": "scene_11/t18:065-j_cups",
+    "distance_m": 0.2087,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t11:006_mustard_bottle",
+    "b": "scene_7/t10:065-a_cups",
+    "distance_m": 0.2096,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_14/t10:061_foam_brick",
+    "b": "scene_14/t12:073-f_lego_duplo",
+    "distance_m": 0.2108,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t1:007_tuna_fish_can",
+    "b": "scene_11/t16:070-a_colored_wood_blocks",
+    "distance_m": 0.216,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t11:006_mustard_bottle",
+    "b": "scene_7/t0:012_strawberry",
+    "distance_m": 0.2163,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t1:007_tuna_fish_can",
+    "b": "scene_12/t1:007_tuna_fish_can",
+    "distance_m": 0.2173,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t19:054_softball",
+    "b": "scene_8/t8:063-a_marbles",
+    "distance_m": 0.2205,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_17/t2:065-c_cups",
+    "b": "scene_17/t18:065-e_cups",
+    "distance_m": 0.2217,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t19:050_medium_clamp",
+    "b": "scene_17/t18:065-e_cups",
+    "distance_m": 0.2223,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_17/t5:002_master_chef_can",
+    "b": "scene_14/t19:065-e_cups",
+    "distance_m": 0.2245,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t6:052_extra_large_clamp",
+    "b": "scene_12/t8:070-a_colored_wood_blocks",
+    "distance_m": 0.2253,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t2:053_mini_soccer_ball",
+    "b": "scene_12/t0:065-f_cups",
+    "distance_m": 0.226,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t19:054_softball",
+    "b": "scene_17/t19:070-a_colored_wood_blocks",
+    "distance_m": 0.2309,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t11:006_mustard_bottle",
+    "b": "scene_11/t1:007_tuna_fish_can",
+    "distance_m": 0.231,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t11:006_mustard_bottle",
+    "b": "scene_12/t12:065-b_cups",
+    "distance_m": 0.2317,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t4:065-h_cups",
+    "b": "scene_7/t7:073-e_lego_duplo",
+    "distance_m": 0.2325,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t1:007_tuna_fish_can",
+    "b": "scene_7/t10:065-a_cups",
+    "distance_m": 0.2331,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t11:006_mustard_bottle",
+    "b": "scene_12/t16:073-b_lego_duplo",
+    "distance_m": 0.2368,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_17/t12:073-a_lego_duplo",
+    "b": "scene_14/t12:073-f_lego_duplo",
+    "distance_m": 0.2368,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t19:050_medium_clamp",
+    "b": "scene_14/t15:065-h_cups",
+    "distance_m": 0.2385,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_17/t5:002_master_chef_can",
+    "b": "scene_12/t0:065-f_cups",
+    "distance_m": 0.2423,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t0:012_strawberry",
+    "b": "scene_17/t9:073-a_lego_duplo",
+    "distance_m": 0.2429,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t1:007_tuna_fish_can",
+    "b": "scene_8/t7:065-h_cups",
+    "distance_m": 0.2431,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_14/t5:005_tomato_soup_can",
+    "b": "scene_7/t4:065-h_cups",
+    "distance_m": 0.2436,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t6:052_extra_large_clamp",
+    "b": "scene_7/t19:054_softball",
+    "distance_m": 0.2522,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t18:002_master_chef_can",
+    "b": "scene_7/t0:012_strawberry",
+    "distance_m": 0.2538,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t13:063-a_marbles",
+    "b": "scene_17/t18:065-e_cups",
+    "distance_m": 0.2546,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_14/t17:013_apple",
+    "b": "scene_11/t16:070-a_colored_wood_blocks",
+    "distance_m": 0.2602,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t17:035_power_drill",
+    "b": "scene_7/t4:065-h_cups",
+    "distance_m": 0.2616,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t6:021_bleach_cleanser",
+    "b": "scene_17/t10:072-c_toy_airplane",
+    "distance_m": 0.2648,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_17/t2:065-c_cups",
+    "b": "scene_11/t18:065-j_cups",
+    "distance_m": 0.2664,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t9:014_lemon",
+    "b": "scene_17/t12:073-a_lego_duplo",
+    "distance_m": 0.2669,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t10:016_pear",
+    "b": "scene_8/t1:072-c_toy_airplane",
+    "distance_m": 0.2681,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t11:006_mustard_bottle",
+    "b": "scene_8/t7:065-h_cups",
+    "distance_m": 0.2721,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_14/t17:013_apple",
+    "b": "scene_12/t12:065-b_cups",
+    "distance_m": 0.273,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_14/t0:063-a_marbles",
+    "b": "scene_14/t15:065-h_cups",
+    "distance_m": 0.2735,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t0:012_strawberry",
+    "b": "scene_7/t18:053_mini_soccer_ball",
+    "distance_m": 0.274,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_14/t0:063-a_marbles",
+    "b": "scene_7/t13:063-a_marbles",
+    "distance_m": 0.2777,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t1:007_tuna_fish_can",
+    "b": "scene_11/t16:070-a_colored_wood_blocks",
+    "distance_m": 0.2791,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_17/t12:073-a_lego_duplo",
+    "b": "scene_7/t7:073-e_lego_duplo",
+    "distance_m": 0.2802,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_7/t0:012_strawberry",
+    "b": "scene_12/t16:073-b_lego_duplo",
+    "distance_m": 0.2808,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t8:070-a_colored_wood_blocks",
+    "b": "scene_12/t10:073-e_lego_duplo",
+    "distance_m": 0.2816,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_14/t5:005_tomato_soup_can",
+    "b": "scene_17/t12:073-a_lego_duplo",
+    "distance_m": 0.2849,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_8/t13:002_master_chef_can",
+    "b": "scene_12/t8:070-a_colored_wood_blocks",
+    "distance_m": 0.2911,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_12/t12:065-b_cups",
+    "b": "scene_8/t0:070-a_colored_wood_blocks",
+    "distance_m": 0.2916,
+    "bounding_spheres_overlap": false
+   },
+   {
+    "a": "scene_11/t7:063-a_marbles",
+    "b": "scene_17/t9:073-a_lego_duplo",
+    "distance_m": 0.2971,
+    "bounding_spheres_overlap": false
+   }
+  ],
+  "model_bounding_radius_m": {
+   "002_master_chef_can": 0.0612,
+   "005_tomato_soup_can": 0.0617,
+   "006_mustard_bottle": 0.1051,
+   "007_tuna_fish_can": 0.0373,
+   "010_potted_meat_can": 0.0671,
+   "012_strawberry": 0.0318,
+   "013_apple": 0.0443,
+   "014_lemon": 0.0371,
+   "016_pear": 0.0576,
+   "018_plum": 0.0325,
+   "021_bleach_cleanser": 0.1368,
+   "024_bowl": 0.0863,
+   "035_power_drill": 0.1219,
+   "044_flat_screwdriver": 0.1089,
+   "050_medium_clamp": 0.057,
+   "052_extra_large_clamp": 0.129,
+   "053_mini_soccer_ball": 0.0341,
+   "054_softball": 0.0354,
+   "057_racquetball": 0.0289,
+   "061_foam_brick": 0.0528,
+   "063-a_marbles": 0.0536,
+   "065-a_cups": 0.0427,
+   "065-b_cups": 0.0448,
+   "065-c_cups": 0.0472,
+   "065-e_cups": 0.0526,
+   "065-f_cups": 0.0549,
+   "065-h_cups": 0.0604,
+   "065-j_cups": 0.0637,
+   "070-a_colored_wood_blocks": 0.0611,
+   "072-c_toy_airplane": 0.0367,
+   "073-a_lego_duplo": 0.0375,
+   "073-b_lego_duplo": 0.031,
+   "073-e_lego_duplo": 0.055,
+   "073-f_lego_duplo": 0.0316
+  }
+ },
+ "objects": [
+  {
+   "model_id": "002_master_chef_can",
+   "position": [
+    3.7183051109313965,
+    -1.7414934635162354,
+    0.45273804664611816
+   ],
+   "orientation": [
+    -0.46718353033065796,
+    1.57120666699484e-05,
+    1.5459299902431667e-05,
+    0.8841603398323059
+   ],
+   "scene": "scene_11",
+   "task_id": 12,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    259.2,
+    488.1
+   ],
+   "visible_pixels": 128,
+   "bounding_radius_m": 0.0612
+  },
+  {
+   "model_id": "002_master_chef_can",
+   "position": [
+    3.7639272212982178,
+    -3.4542319774627686,
+    0.5105584859848022
+   ],
+   "orientation": [
+    0.6541421413421631,
+    0.05065241828560829,
+    0.05928977578878403,
+    0.7523411512374878
+   ],
+   "scene": "scene_17",
+   "task_id": 5,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    168.9,
+    365.3
+   ],
+   "visible_pixels": 101,
+   "bounding_radius_m": 0.0612
+  },
+  {
+   "model_id": "002_master_chef_can",
+   "position": [
+    3.7593371868133545,
+    -2.0948169231414795,
+    0.4527386426925659
+   ],
+   "orientation": [
+    -0.9240814447402954,
+    -1.3737175322603434e-05,
+    -1.0074261808767915e-05,
+    0.38219553232192993
+   ],
+   "scene": "scene_8",
+   "task_id": 13,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    234.8,
+    462.3
+   ],
+   "visible_pixels": 124,
+   "bounding_radius_m": 0.0612
+  },
+  {
+   "model_id": "002_master_chef_can",
+   "position": [
+    1.2533658742904663,
+    0.468853622674942,
+    0.9857524633407593
+   ],
+   "orientation": [
+    0.3051053285598755,
+    -3.6745143006555736e-05,
+    3.7377438275143504e-05,
+    0.9523186683654785
+   ],
+   "scene": "scene_8",
+   "task_id": 18,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    705.8,
+    461.9
+   ],
+   "visible_pixels": 159,
+   "bounding_radius_m": 0.0612
+  },
+  {
+   "model_id": "005_tomato_soup_can",
+   "position": [
+    3.8129522800445557,
+    -1.1838610172271729,
+    0.45436617732048035
+   ],
+   "orientation": [
+    0.8891094326972961,
+    1.8367660231888294e-05,
+    2.7024419978260994e-05,
+    0.4576948881149292
+   ],
+   "scene": "scene_14",
+   "task_id": 5,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    281.6,
+    544.8
+   ],
+   "visible_pixels": 134,
+   "bounding_radius_m": 0.0617
+  },
+  {
+   "model_id": "006_mustard_bottle",
+   "position": [
+    2.5959434509277344,
+    -7.630772113800049,
+    0.7127760648727417
+   ],
+   "orientation": [
+    -0.9918461441993713,
+    0.003489755792543292,
+    -0.0004271012148819864,
+    0.1273934543132782
+   ],
+   "scene": "scene_11",
+   "task_id": 11,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "collision",
+   "uv_overview": [
+    133.5,
+    142.7
+   ],
+   "visible_pixels": 95,
+   "bounding_radius_m": 0.1051
+  },
+  {
+   "model_id": "006_mustard_bottle",
+   "position": [
+    1.0406159162521362,
+    0.07418118417263031,
+    1.0337755680084229
+   ],
+   "orientation": [
+    -0.9602950215339661,
+    0.003335862420499325,
+    -0.0009120128815993667,
+    0.2789653539657593
+   ],
+   "scene": "scene_12",
+   "task_id": 11,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    681.5,
+    410.3
+   ],
+   "visible_pixels": 212,
+   "bounding_radius_m": 0.1051
+  },
+  {
+   "model_id": "007_tuna_fish_can",
+   "position": [
+    2.381028890609741,
+    -7.61907958984375,
+    0.6289371848106384
+   ],
+   "orientation": [
+    -0.3881152868270874,
+    -0.0019491573330014944,
+    -0.002655725460499525,
+    0.9216050505638123
+   ],
+   "scene": "scene_11",
+   "task_id": 1,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    152.2,
+    144.3
+   ],
+   "visible_pixels": 20,
+   "bounding_radius_m": 0.0373
+  },
+  {
+   "model_id": "007_tuna_fish_can",
+   "position": [
+    2.578583002090454,
+    -7.528548240661621,
+    0.6289362907409668
+   ],
+   "orientation": [
+    -0.07160111516714096,
+    -0.0026978757232427597,
+    -0.0018881643190979958,
+    0.9974280595779419
+   ],
+   "scene": "scene_12",
+   "task_id": 1,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    139.8,
+    151.1
+   ],
+   "visible_pixels": 20,
+   "bounding_radius_m": 0.0373
+  },
+  {
+   "model_id": "010_potted_meat_can",
+   "position": [
+    0.1039186343550682,
+    -1.5417128801345825,
+    0.7923723459243774
+   ],
+   "orientation": [
+    -0.9075859189033508,
+    -0.0043709417805075645,
+    0.0033900628332048655,
+    0.4198301434516907
+   ],
+   "scene": "scene_17",
+   "task_id": 7,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    604.0,
+    284.0
+   ],
+   "visible_pixels": 100,
+   "bounding_radius_m": 0.0671
+  },
+  {
+   "model_id": "012_strawberry",
+   "position": [
+    1.1005319356918335,
+    0.2680031955242157,
+    0.9588383436203003
+   ],
+   "orientation": [
+    0.9903684258460999,
+    -0.030005428940057755,
+    0.005565256346017122,
+    0.1350531131029129
+   ],
+   "scene": "scene_7",
+   "task_id": 0,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    695.3,
+    436.3
+   ],
+   "visible_pixels": 31,
+   "bounding_radius_m": 0.0318
+  },
+  {
+   "model_id": "013_apple",
+   "position": [
+    1.19963538646698,
+    -5.407009124755859,
+    0.4483768939971924
+   ],
+   "orientation": [
+    0.5948964953422546,
+    -0.006838217377662659,
+    -0.0049759685061872005,
+    0.803757905960083
+   ],
+   "scene": "scene_12",
+   "task_id": 13,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    314.0,
+    193.3
+   ],
+   "visible_pixels": 32,
+   "bounding_radius_m": 0.0443
+  },
+  {
+   "model_id": "013_apple",
+   "position": [
+    2.496802806854248,
+    -7.535561561584473,
+    0.6499063968658447
+   ],
+   "orientation": [
+    -0.014598332345485687,
+    -0.8895785212516785,
+    0.4544362723827362,
+    -0.04387402534484863
+   ],
+   "scene": "scene_14",
+   "task_id": 17,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    145.2,
+    147.6
+   ],
+   "visible_pixels": 33,
+   "bounding_radius_m": 0.0443
+  },
+  {
+   "model_id": "014_lemon",
+   "position": [
+    3.7313830852508545,
+    -1.2921850681304932,
+    0.43023616075515747
+   ],
+   "orientation": [
+    -0.2644194960594177,
+    -0.14506563544273376,
+    0.2031686007976532,
+    0.931536853313446
+   ],
+   "scene": "scene_8",
+   "task_id": 9,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    285.4,
+    530.1
+   ],
+   "visible_pixels": 52,
+   "bounding_radius_m": 0.0371
+  },
+  {
+   "model_id": "014_lemon",
+   "position": [
+    0.7244481444358826,
+    -1.9345425367355347,
+    0.7773324847221375
+   ],
+   "orientation": [
+    0.77591472864151,
+    0.015504032373428345,
+    -0.22175994515419006,
+    0.5903716087341309
+   ],
+   "scene": "scene_8",
+   "task_id": 16,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    529.5,
+    290.9
+   ],
+   "visible_pixels": 30,
+   "bounding_radius_m": 0.0371
+  },
+  {
+   "model_id": "016_pear",
+   "position": [
+    -0.4403912425041199,
+    -2.0381908416748047,
+    0.7835779786109924
+   ],
+   "orientation": [
+    -0.47833937406539917,
+    7.548928260803223e-05,
+    0.00014129281044006348,
+    0.878174901008606
+   ],
+   "scene": "scene_8",
+   "task_id": 10,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    604.7,
+    242.0
+   ],
+   "visible_pixels": 15,
+   "bounding_radius_m": 0.0576
+  },
+  {
+   "model_id": "018_plum",
+   "position": [
+    -0.22029145061969757,
+    -1.3427150249481201,
+    0.7773630619049072
+   ],
+   "orientation": [
+    0.8323367834091187,
+    2.7387170121073723e-05,
+    -7.3015689849853516e-06,
+    0.5542705655097961
+   ],
+   "scene": "scene_17",
+   "task_id": 1,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    641.5,
+    282.0
+   ],
+   "visible_pixels": 24,
+   "bounding_radius_m": 0.0325
+  },
+  {
+   "model_id": "021_bleach_cleanser",
+   "position": [
+    1.3526527881622314,
+    -5.422924518585205,
+    0.541593074798584
+   ],
+   "orientation": [
+    0.1328817903995514,
+    -0.029474791139364243,
+    0.017462143674492836,
+    0.9905397295951843
+   ],
+   "scene": "scene_8",
+   "task_id": 6,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "collision",
+   "uv_overview": [
+    301.0,
+    190.2
+   ],
+   "visible_pixels": 137,
+   "bounding_radius_m": 0.1368
+  },
+  {
+   "model_id": "024_bowl",
+   "position": [
+    3.9126346111297607,
+    -3.431781530380249,
+    0.5478981137275696
+   ],
+   "orientation": [
+    -0.5038998126983643,
+    -0.0018054853426292539,
+    -0.03825635090470314,
+    0.8629127740859985
+   ],
+   "scene": "scene_11",
+   "task_id": 13,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    152.1,
+    371.1
+   ],
+   "visible_pixels": 195,
+   "bounding_radius_m": 0.0863
+  },
+  {
+   "model_id": "035_power_drill",
+   "position": [
+    4.016836166381836,
+    -1.618774652481079,
+    0.4329145848751068
+   ],
+   "orientation": [
+    -0.9848545789718628,
+    2.1635787561535835e-06,
+    -4.912726581096649e-08,
+    0.17338256537914276
+   ],
+   "scene": "scene_11",
+   "task_id": 17,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    230.2,
+    521.4
+   ],
+   "visible_pixels": 327,
+   "bounding_radius_m": 0.1219
+  },
+  {
+   "model_id": "044_flat_screwdriver",
+   "position": [
+    0.5793524384498596,
+    -1.4069269895553589,
+    0.7678975462913513
+   ],
+   "orientation": [
+    -0.9944857954978943,
+    -0.004115062300115824,
+    0.003425543662160635,
+    0.10473529249429703
+   ],
+   "scene": "scene_11",
+   "task_id": 2,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    579.2,
+    312.9
+   ],
+   "visible_pixels": 41,
+   "bounding_radius_m": 0.1089
+  },
+  {
+   "model_id": "050_medium_clamp",
+   "position": [
+    0.2627131938934326,
+    0.01638619601726532,
+    0.9498506188392639
+   ],
+   "orientation": [
+    -0.036820072680711746,
+    -0.00024362653493881226,
+    -2.5401095626875758e-05,
+    0.9993218779563904
+   ],
+   "scene": "scene_8",
+   "task_id": 19,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    734.2,
+    367.4
+   ],
+   "visible_pixels": 32,
+   "bounding_radius_m": 0.057
+  },
+  {
+   "model_id": "052_extra_large_clamp",
+   "position": [
+    3.830432176589966,
+    -2.0314717292785645,
+    0.42228275537490845
+   ],
+   "orientation": [
+    0.6398840546607971,
+    0.013453716412186623,
+    0.0006232147570699453,
+    0.7683534622192383
+   ],
+   "scene": "scene_7",
+   "task_id": 6,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    230.8,
+    474.2
+   ],
+   "visible_pixels": 171,
+   "bounding_radius_m": 0.129
+  },
+  {
+   "model_id": "053_mini_soccer_ball",
+   "position": [
+    3.7854256629943848,
+    -3.44647216796875,
+    0.48595842719078064
+   ],
+   "orientation": [
+    0.5837573409080505,
+    -0.1741730272769928,
+    0.3458922207355499,
+    -0.7136175036430359
+   ],
+   "scene": "scene_12",
+   "task_id": 2,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    167.8,
+    368.8
+   ],
+   "visible_pixels": 40,
+   "bounding_radius_m": 0.0341
+  },
+  {
+   "model_id": "053_mini_soccer_ball",
+   "position": [
+    0.6128743290901184,
+    -0.029118971899151802,
+    0.9669399261474609
+   ],
+   "orientation": [
+    0.37099525332450867,
+    -0.006243545562028885,
+    -0.012207390740513802,
+    0.928533673286438
+   ],
+   "scene": "scene_14",
+   "task_id": 18,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    703.5,
+    382.5
+   ],
+   "visible_pixels": 50,
+   "bounding_radius_m": 0.0341
+  },
+  {
+   "model_id": "053_mini_soccer_ball",
+   "position": [
+    1.2185975313186646,
+    0.020866457372903824,
+    0.9669110774993896
+   ],
+   "orientation": [
+    -0.2977920472621918,
+    0.002776842564344406,
+    -0.013714669272303581,
+    0.9545283317565918
+   ],
+   "scene": "scene_7",
+   "task_id": 18,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    658.7,
+    423.5
+   ],
+   "visible_pixels": 61,
+   "bounding_radius_m": 0.0341
+  },
+  {
+   "model_id": "054_softball",
+   "position": [
+    4.064970970153809,
+    -1.9399558305740356,
+    0.43633031845092773
+   ],
+   "orientation": [
+    -0.9892669320106506,
+    -0.00011592917144298553,
+    -0.00017927726730704308,
+    0.14612029492855072
+   ],
+   "scene": "scene_7",
+   "task_id": 19,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    206.6,
+    496.5
+   ],
+   "visible_pixels": 66,
+   "bounding_radius_m": 0.0354
+  },
+  {
+   "model_id": "057_racquetball",
+   "position": [
+    1.3645708560943604,
+    -6.208330154418945,
+    0.44283145666122437
+   ],
+   "orientation": [
+    0.9699149131774902,
+    -0.014282272197306156,
+    0.19257819652557373,
+    0.14823991060256958
+   ],
+   "scene": "scene_17",
+   "task_id": 11,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    272.8,
+    173.4
+   ],
+   "visible_pixels": 15,
+   "bounding_radius_m": 0.0289
+  },
+  {
+   "model_id": "061_foam_brick",
+   "position": [
+    4.013187408447266,
+    -1.423500657081604,
+    0.4291425347328186
+   ],
+   "orientation": [
+    -0.8530009984970093,
+    -8.774921298027039e-06,
+    -2.4926193873398006e-05,
+    0.5219095349311829
+   ],
+   "scene": "scene_14",
+   "task_id": 10,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    242.1,
+    539.4
+   ],
+   "visible_pixels": 114,
+   "bounding_radius_m": 0.0528
+  },
+  {
+   "model_id": "063-a_marbles",
+   "position": [
+    0.8498664498329163,
+    0.46261316537857056,
+    0.9551274180412292
+   ],
+   "orientation": [
+    0.6254793405532837,
+    0.4274396300315857,
+    0.002385992556810379,
+    0.652737021446228
+   ],
+   "scene": "scene_11",
+   "task_id": 7,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    738.0,
+    435.8
+   ],
+   "visible_pixels": 83,
+   "bounding_radius_m": 0.0536
+  },
+  {
+   "model_id": "063-a_marbles",
+   "position": [
+    0.1963108628988266,
+    -0.0601491779088974,
+    0.9551857113838196
+   ],
+   "orientation": [
+    -0.8162496089935303,
+    -0.13656634092330933,
+    0.40501952171325684,
+    0.38864579796791077
+   ],
+   "scene": "scene_14",
+   "task_id": 0,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    731.4,
+    358.3
+   ],
+   "visible_pixels": 63,
+   "bounding_radius_m": 0.0536
+  },
+  {
+   "model_id": "063-a_marbles",
+   "position": [
+    0.28252744674682617,
+    0.20383921265602112,
+    0.9551689624786377
+   ],
+   "orientation": [
+    0.13599178194999695,
+    0.3482191562652588,
+    0.24786785244941711,
+    0.8937624096870422
+   ],
+   "scene": "scene_7",
+   "task_id": 13,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    752.9,
+    380.9
+   ],
+   "visible_pixels": 71,
+   "bounding_radius_m": 0.0536
+  },
+  {
+   "model_id": "063-a_marbles",
+   "position": [
+    4.061587333679199,
+    -1.7199114561080933,
+    0.42209380865097046
+   ],
+   "orientation": [
+    -0.5145454406738281,
+    0.08312300592660904,
+    0.4192810356616974,
+    0.7433284521102905
+   ],
+   "scene": "scene_8",
+   "task_id": 8,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    219.3,
+    516.4
+   ],
+   "visible_pixels": 78,
+   "bounding_radius_m": 0.0536
+  },
+  {
+   "model_id": "065-a_cups",
+   "position": [
+    2.4066004753112793,
+    -7.685413837432861,
+    0.6414939761161804
+   ],
+   "orientation": [
+    0.4088067412376404,
+    0.5278010368347168,
+    0.41100654006004333,
+    0.6207873225212097
+   ],
+   "scene": "scene_7",
+   "task_id": 10,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "planning_failure",
+   "uv_overview": [
+    148.3,
+    142.2
+   ],
+   "visible_pixels": 22,
+   "bounding_radius_m": 0.0427
+  },
+  {
+   "model_id": "065-b_cups",
+   "position": [
+    2.7657251358032227,
+    -7.48888635635376,
+    0.6438661217689514
+   ],
+   "orientation": [
+    -0.41016989946365356,
+    0.5062306523323059,
+    0.44308072328567505,
+    0.6157686114311218
+   ],
+   "scene": "scene_12",
+   "task_id": 12,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    125.7,
+    155.5
+   ],
+   "visible_pixels": 24,
+   "bounding_radius_m": 0.0448
+  },
+  {
+   "model_id": "065-c_cups",
+   "position": [
+    0.11574555933475494,
+    -0.12161435931921005,
+    0.9699264168739319
+   ],
+   "orientation": [
+    0.8514532446861267,
+    -0.005738629028201103,
+    0.0017954738577827811,
+    0.5243961215019226
+   ],
+   "scene": "scene_17",
+   "task_id": 2,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    731.4,
+    348.8
+   ],
+   "visible_pixels": 71,
+   "bounding_radius_m": 0.0472
+  },
+  {
+   "model_id": "065-e_cups",
+   "position": [
+    3.9694178104400635,
+    -3.3717575073242188,
+    0.5475858449935913
+   ],
+   "orientation": [
+    0.5112277865409851,
+    -0.004942089319229126,
+    0.12259618937969208,
+    0.8506421446800232
+   ],
+   "scene": "scene_14",
+   "task_id": 19,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    148.1,
+    377.8
+   ],
+   "visible_pixels": 58,
+   "bounding_radius_m": 0.0526
+  },
+  {
+   "model_id": "065-e_cups",
+   "position": [
+    0.05472652614116669,
+    0.09148107469081879,
+    0.9723535180091858
+   ],
+   "orientation": [
+    -0.8038050532341003,
+    1.9595026969909668e-05,
+    -5.337875336408615e-06,
+    0.5948927998542786
+   ],
+   "scene": "scene_17",
+   "task_id": 18,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "collision",
+   "uv_overview": [
+    757.9,
+    359.1
+   ],
+   "visible_pixels": 95,
+   "bounding_radius_m": 0.0526
+  },
+  {
+   "model_id": "065-f_cups",
+   "position": [
+    4.003631591796875,
+    -3.4470436573028564,
+    0.5448675155639648
+   ],
+   "orientation": [
+    0.9239473342895508,
+    0.10571000725030899,
+    0.09354017674922943,
+    0.35552385449409485
+   ],
+   "scene": "scene_12",
+   "task_id": 0,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    141.3,
+    375.0
+   ],
+   "visible_pixels": 88,
+   "bounding_radius_m": 0.0549
+  },
+  {
+   "model_id": "065-f_cups",
+   "position": [
+    1.3306118249893188,
+    -6.042266845703125,
+    0.45105263590812683
+   ],
+   "orientation": [
+    -0.8518517017364502,
+    -0.0043979212641716,
+    0.007188316434621811,
+    0.5237153768539429
+   ],
+   "scene": "scene_12",
+   "task_id": 15,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    280.9,
+    176.9
+   ],
+   "visible_pixels": 40,
+   "bounding_radius_m": 0.0549
+  },
+  {
+   "model_id": "065-h_cups",
+   "position": [
+    -0.5773253440856934,
+    -1.5218819379806519,
+    0.7895111441612244
+   ],
+   "orientation": [
+    0.8378755450248718,
+    3.3387914299964905e-07,
+    2.2202730178833008e-06,
+    0.5458614230155945
+   ],
+   "scene": "scene_14",
+   "task_id": 1,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    651.4,
+    259.0
+   ],
+   "visible_pixels": 77,
+   "bounding_radius_m": 0.0604
+  },
+  {
+   "model_id": "065-h_cups",
+   "position": [
+    0.11150290817022324,
+    0.1991162747144699,
+    0.975102424621582
+   ],
+   "orientation": [
+    0.7948198914527893,
+    0.00023149559274315834,
+    -0.0005122926086187363,
+    0.6068453788757324
+   ],
+   "scene": "scene_14",
+   "task_id": 15,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    765.5,
+    369.2
+   ],
+   "visible_pixels": 113,
+   "bounding_radius_m": 0.0604
+  },
+  {
+   "model_id": "065-h_cups",
+   "position": [
+    3.840763807296753,
+    -1.4255099296569824,
+    0.44199368357658386
+   ],
+   "orientation": [
+    -0.8773646950721741,
+    -6.76838681101799e-06,
+    -1.2206844985485077e-05,
+    0.4798245131969452
+   ],
+   "scene": "scene_7",
+   "task_id": 4,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    263.3,
+    525.2
+   ],
+   "visible_pixels": 152,
+   "bounding_radius_m": 0.0604
+  },
+  {
+   "model_id": "065-h_cups",
+   "position": [
+    2.8157641887664795,
+    -7.481596946716309,
+    0.6540347337722778
+   ],
+   "orientation": [
+    0.9422375559806824,
+    -7.442431524395943e-06,
+    5.898997187614441e-06,
+    0.33494579792022705
+   ],
+   "scene": "scene_8",
+   "task_id": 7,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    122.0,
+    156.1
+   ],
+   "visible_pixels": 54,
+   "bounding_radius_m": 0.0604
+  },
+  {
+   "model_id": "065-j_cups",
+   "position": [
+    0.15047113597393036,
+    0.1424987018108368,
+    0.9747353792190552
+   ],
+   "orientation": [
+    0.9990205764770508,
+    -1.2349803000688553e-05,
+    -9.000347927212715e-05,
+    0.04424888640642166
+   ],
+   "scene": "scene_11",
+   "task_id": 18,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    756.6,
+    367.5
+   ],
+   "visible_pixels": 155,
+   "bounding_radius_m": 0.0637
+  },
+  {
+   "model_id": "070-a_colored_wood_blocks",
+   "position": [
+    2.5023813247680664,
+    -7.795589923858643,
+    0.6566603183746338
+   ],
+   "orientation": [
+    0.702307939529419,
+    4.5048072934150696e-05,
+    2.7285423129796982e-05,
+    0.7118733525276184
+   ],
+   "scene": "scene_11",
+   "task_id": 16,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "planning_failure",
+   "uv_overview": [
+    137.8,
+    140.3
+   ],
+   "visible_pixels": 45,
+   "bounding_radius_m": 0.0611
+  },
+  {
+   "model_id": "070-a_colored_wood_blocks",
+   "position": [
+    4.049795627593994,
+    -2.0775539875030518,
+    0.4446224868297577
+   ],
+   "orientation": [
+    -0.4566631019115448,
+    -5.410052835941315e-06,
+    1.1701369658112526e-05,
+    0.8896397948265076
+   ],
+   "scene": "scene_12",
+   "task_id": 8,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    201.1,
+    483.4
+   ],
+   "visible_pixels": 128,
+   "bounding_radius_m": 0.0611
+  },
+  {
+   "model_id": "070-a_colored_wood_blocks",
+   "position": [
+    3.868252754211426,
+    -2.060577630996704,
+    0.4446225166320801
+   ],
+   "orientation": [
+    0.4698672592639923,
+    -6.8480148911476135e-06,
+    -7.774913683533669e-06,
+    0.8827369809150696
+   ],
+   "scene": "scene_17",
+   "task_id": 19,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    224.0,
+    472.7
+   ],
+   "visible_pixels": 127,
+   "bounding_radius_m": 0.0611
+  },
+  {
+   "model_id": "070-a_colored_wood_blocks",
+   "position": [
+    2.5004022121429443,
+    -7.609238624572754,
+    0.6566634178161621
+   ],
+   "orientation": [
+    0.3078317642211914,
+    -8.754432201385498e-06,
+    3.2152747735381126e-06,
+    0.951440691947937
+   ],
+   "scene": "scene_8",
+   "task_id": 0,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    142.8,
+    145.2
+   ],
+   "visible_pixels": 47,
+   "bounding_radius_m": 0.0611
+  },
+  {
+   "model_id": "072-c_toy_airplane",
+   "position": [
+    1.1599353551864624,
+    -5.26880407333374,
+    0.44549843668937683
+   ],
+   "orientation": [
+    -0.8025662899017334,
+    -0.005082123912870884,
+    0.00672577042132616,
+    0.5965034365653992
+   ],
+   "scene": "scene_17",
+   "task_id": 10,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    322.3,
+    196.9
+   ],
+   "visible_pixels": 3,
+   "bounding_radius_m": 0.0367
+  },
+  {
+   "model_id": "072-c_toy_airplane",
+   "position": [
+    -0.18151088058948517,
+    -2.107722282409668,
+    0.7845556139945984
+   ],
+   "orientation": [
+    -0.8141053318977356,
+    -2.102653161273338e-05,
+    -2.6260728191118687e-05,
+    0.580717146396637
+   ],
+   "scene": "scene_8",
+   "task_id": 1,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    582.7,
+    248.0
+   ],
+   "visible_pixels": 3,
+   "bounding_radius_m": 0.0367
+  },
+  {
+   "model_id": "073-a_lego_duplo",
+   "position": [
+    0.8798683881759644,
+    0.16708724200725555,
+    0.9486228227615356
+   ],
+   "orientation": [
+    0.8902685046195984,
+    -2.0896317437291145e-05,
+    2.3881992092356086e-05,
+    0.4554363191127777
+   ],
+   "scene": "scene_17",
+   "task_id": 9,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    702.4,
+    414.8
+   ],
+   "visible_pixels": 34,
+   "bounding_radius_m": 0.0375
+  },
+  {
+   "model_id": "073-a_lego_duplo",
+   "position": [
+    3.963883876800537,
+    -1.4223638772964478,
+    0.41557809710502625
+   ],
+   "orientation": [
+    -0.3835521340370178,
+    1.5001744031906128e-05,
+    4.0610917494632304e-05,
+    0.9235193729400635
+   ],
+   "scene": "scene_17",
+   "task_id": 12,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    248.9,
+    536.7
+   ],
+   "visible_pixels": 41,
+   "bounding_radius_m": 0.0375
+  },
+  {
+   "model_id": "073-b_lego_duplo",
+   "position": [
+    1.2621397972106934,
+    0.03834272176027298,
+    0.9582255482673645
+   ],
+   "orientation": [
+    -0.9940847158432007,
+    5.794502794742584e-05,
+    3.5293400287628174e-05,
+    0.10860789567232132
+   ],
+   "scene": "scene_12",
+   "task_id": 16,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    656.5,
+    428.5
+   ],
+   "visible_pixels": 34,
+   "bounding_radius_m": 0.031
+  },
+  {
+   "model_id": "073-e_lego_duplo",
+   "position": [
+    3.7695529460906982,
+    -2.0581424236297607,
+    0.4253351092338562
+   ],
+   "orientation": [
+    0.8980235457420349,
+    4.887813702225685e-06,
+    -2.3929706003400497e-05,
+    0.4399477243423462
+   ],
+   "scene": "scene_12",
+   "task_id": 10,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    236.4,
+    467.9
+   ],
+   "visible_pixels": 68,
+   "bounding_radius_m": 0.055
+  },
+  {
+   "model_id": "073-e_lego_duplo",
+   "position": [
+    3.7964110374450684,
+    -1.1978944540023804,
+    0.4253331422805786
+   ],
+   "orientation": [
+    0.5308932662010193,
+    -1.882435753941536e-05,
+    6.2351609813049436e-06,
+    0.8474388718605042
+   ],
+   "scene": "scene_7",
+   "task_id": 7,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    283.6,
+    544.3
+   ],
+   "visible_pixels": 75,
+   "bounding_radius_m": 0.055
+  },
+  {
+   "model_id": "073-f_lego_duplo",
+   "position": [
+    1.1874436140060425,
+    0.10069774836301804,
+    0.9582594633102417
+   ],
+   "orientation": [
+    -0.8385144472122192,
+    0.0013893172144889832,
+    0.002102926140651107,
+    0.5448735952377319
+   ],
+   "scene": "scene_11",
+   "task_id": 10,
+   "tier": "5/5",
+   "n_success": 5,
+   "n_runs": 5,
+   "failure_reason": null,
+   "uv_overview": [
+    669.6,
+    428.6
+   ],
+   "visible_pixels": 29,
+   "bounding_radius_m": 0.0316
+  },
+  {
+   "model_id": "073-f_lego_duplo",
+   "position": [
+    4.110278606414795,
+    -1.2364325523376465,
+    0.4252208173274994
+   ],
+   "orientation": [
+    0.4089476466178894,
+    0.002271421253681183,
+    -0.0010138829238712788,
+    0.9125544428825378
+   ],
+   "scene": "scene_14",
+   "task_id": 12,
+   "tier": "4/5",
+   "n_success": 4,
+   "n_runs": 5,
+   "failure_reason": "grasping_failure",
+   "uv_overview": [
+    240.9,
+    565.7
+   ],
+   "visible_pixels": 40,
+   "bounding_radius_m": 0.0316
+  }
+ ]
+}
