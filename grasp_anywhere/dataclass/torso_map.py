@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pickle
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 
@@ -13,6 +14,7 @@ class TorsoMap:
     xyz_to_index: dict[tuple[int, int, int], int]
 
     @classmethod
+    @lru_cache(maxsize=None)
     def from_file(cls, path: str) -> "TorsoMap":
         with open(path, "rb") as f:
             payload = pickle.load(f)

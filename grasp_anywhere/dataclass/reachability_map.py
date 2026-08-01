@@ -1,5 +1,6 @@
 import pickle
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 import torch
@@ -30,6 +31,7 @@ class CapabilityMap:
     kdtree: KDTree
 
     @classmethod
+    @lru_cache(maxsize=None)
     def from_file(cls, map_path: str) -> "CapabilityMap":
         """Load reachability map from pickle file.
 
@@ -76,6 +78,7 @@ class ReachabilityMap:
     scores: np.ndarray
 
     @classmethod
+    @lru_cache(maxsize=None)
     def from_file(cls, map_path: str) -> "ReachabilityMap":
         """Load a reachability voxel map from a pickle file."""
         with open(map_path, "rb") as f:

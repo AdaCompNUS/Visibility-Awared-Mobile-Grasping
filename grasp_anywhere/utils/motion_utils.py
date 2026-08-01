@@ -8,7 +8,7 @@ from nav_msgs.msg import Path
 from grasp_anywhere.data_collector.trajectory_collector import episode_record
 from grasp_anywhere.observation import GazeOptimizer
 from grasp_anywhere.observation.finean_gaze_optimizer import FineanGazeOptimizer
-from grasp_anywhere.utils.logger import log, log_warn_throttle
+from grasp_anywhere.utils.logger import log, log_info_throttle, log_warn_throttle
 from grasp_anywhere.utils.rviz_utils import publish_base_path
 
 
@@ -68,7 +68,7 @@ def _find_current_waypoint_index(base_configs, current_base_config):
 def _maybe_record_episode(robot, snapshot):
     """Helper to record a single timestep if an episode is active."""
     active_cfg = getattr(robot, "_active_episode_cfg", None)
-    if active_cfg is not None and snapshot is not None:
+    if active_cfg is not None and not active_cfg.disabled and snapshot is not None:
         qpos = np.asarray(
             [*robot.get_base_params(), *robot.get_current_planning_joints()],
             dtype=np.float32,
@@ -93,6 +93,13 @@ def _maybe_record_episode(robot, snapshot):
             qpos=qpos,
             head_qpos=head_qpos,
         )
+
+
+def _record_latest_episode(robot):
+    """Capture a sensor snapshot only when episode recording is enabled."""
+    active_cfg = getattr(robot, "_active_episode_cfg", None)
+    if active_cfg is not None and not active_cfg.disabled:
+        _maybe_record_episode(robot, robot.robot_env.get_sensor_snapshot())
 
 
 def _update_collision_environment(robot, enable_pcd_alignment=False):
@@ -139,7 +146,7 @@ def _update_collision_environment(robot, enable_pcd_alignment=False):
         #    points that were masked at the start (allowing the plan) suddenly appear when the
         #    robot moves away, invalidating the goal.
         robot.add_pointcloud(combined_pcd, filter_robot=True, point_radius=0.03)
-        log.info("Collision environment updated from scene manager.")
+        log_info_throttle(5.0, "Collision environment updated from scene manager.")
     return snapshot
 
 
@@ -219,9 +226,10 @@ def move_to_config_with_replanning(
         publish_base_path(path_pub, base_configs, "map")
     except Exception:
         pass
-    save_whole_body_trajectory(
-        arm_path, base_configs, filename="debug/initial_config_plan.npy"
-    )
+    if robot.enable_debug:
+        save_whole_body_trajectory(
+            arm_path, base_configs, filename="debug/initial_config_plan.npy"
+        )
 
     # --- Initialize Gaze Control ---
     gaze_optimizer = None
@@ -361,11 +369,12 @@ def move_to_config_with_replanning(
                         publish_base_path(path_pub, base_configs, "map")
                     except Exception:
                         pass
-                    save_whole_body_trajectory(
-                        arm_path,
-                        base_configs,
-                        filename=f"debug/replan_config_{attempt}.npy",
-                    )
+                    if robot.enable_debug:
+                        save_whole_body_trajectory(
+                            arm_path,
+                            base_configs,
+                            filename=f"debug/replan_config_{attempt}.npy",
+                        )
 
                     if not robot.start_whole_body_motion(arm_path, base_configs):
                         log.error("Failed to start motion after replanning.")
@@ -402,7 +411,7 @@ def move_to_config_with_replanning(
                     f"Failed to replan after {max_replan_attempts} attempts.",
                 )
         else:
-            log.info("Path is clear. Continuing motion.")
+            log_info_throttle(5.0, "Path is clear. Continuing motion.")
 
             # Replanning rate: 1 Hz, but update gaze at 10 Hz
             for _ in range(5):
@@ -415,7 +424,7 @@ def move_to_config_with_replanning(
                 if gaze_optimizer is not None:
                     gaze_optimizer.update(waypoint_index)
 
-                _maybe_record_episode(robot, robot.robot_env.get_sensor_snapshot())
+                _record_latest_episode(robot)
                 time.sleep(0.1)
 
     # Cancel any pending head movements when body motion completes
@@ -694,5 +703,5 @@ def move_arm_with_replanning(
                 if gaze_optimizer is not None:
                     gaze_optimizer.update(current_waypoint_index)
 
-            _maybe_record_episode(robot, robot.robot_env.get_sensor_snapshot())
+            _record_latest_episode(robot)
             time.sleep(0.1)

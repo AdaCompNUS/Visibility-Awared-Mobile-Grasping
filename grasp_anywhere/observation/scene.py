@@ -52,6 +52,7 @@ class Scene:
 
         self._M = np.empty((0, 3), dtype=np.float32)
         self._G = np.empty((0, 3), dtype=np.float32)
+        self._environment_cache: Optional[np.ndarray] = None
 
         # Simple parameters (no config object)
         self.ground_z_threshold = ground_z_threshold
@@ -129,6 +130,7 @@ class Scene:
         if self.mode == "latest":
             with self._lock:
                 self._M = pcd_world
+                self._environment_cache = None
         elif self.mode == "accumulated":
             self._update_core(pcd_world, frustum=frustum)
         elif self.mode == "combine":
@@ -142,6 +144,7 @@ class Scene:
         """Clear the dynamic observation map M."""
         with self._lock:
             self._M = np.empty((0, 3), dtype=np.float32)
+            self._environment_cache = None
             return None
 
     def set_goal_pcd(self, pcd_world: np.ndarray) -> None:
@@ -171,14 +174,18 @@ class Scene:
     ) -> np.ndarray:
         """Return E(t) = S ∪ M(t) as a point cloud. Optionally cropped to ROI."""
         with self._lock:
-            if self.mode == "static":
-                env = self._S.copy()
-            elif self._S is None or len(self._S) == 0:
-                env = self._M.copy()
-            elif len(self._M) == 0:
-                env = self._S.copy()
-            else:
-                env = self._merge_dedup(self._S, self._M, self.merge_radius)
+            if self._environment_cache is None:
+                if self.mode == "static":
+                    self._environment_cache = self._S.copy()
+                elif self._S is None or len(self._S) == 0:
+                    self._environment_cache = self._M.copy()
+                elif len(self._M) == 0:
+                    self._environment_cache = self._S.copy()
+                else:
+                    self._environment_cache = self._merge_dedup(
+                        self._S, self._M, self.merge_radius
+                    )
+            env = self._environment_cache.copy()
 
         if roi_center is not None and roi_radius is not None and len(env) > 0:
             env = self._crop_sphere(
@@ -332,6 +339,7 @@ class Scene:
             M = self._merge_dedup(M, pcd_world, self.merge_radius)
 
             self._M = M
+            self._environment_cache = None
             return None
 
     def _update_combine(self, pcd_world: np.ndarray) -> None:
@@ -358,6 +366,7 @@ class Scene:
             M = np.asarray(pcd.points, dtype=np.float32)
 
             self._M = M
+            self._environment_cache = None
             return None
 
     def _update_ray_casting(
@@ -468,6 +477,7 @@ class Scene:
                 M = self._merge_dedup(M, pcd_world, self.merge_radius)
 
             self._M = M
+            self._environment_cache = None
 
     def _filter_points(
         self,

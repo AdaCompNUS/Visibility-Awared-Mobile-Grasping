@@ -105,7 +105,7 @@ class ManiSkillEnv(RobotEnv):
         )
         self._lock = threading.RLock()
         self._env_lock = threading.RLock()
-        self._running = True
+        self._stop_event = threading.Event()
         self._tick_hz = 30.0
 
         # Waypoint stream: merged whole-body waypoints [x, y, th, torso, 7 arm]
@@ -187,14 +187,16 @@ class ManiSkillEnv(RobotEnv):
         self._bg_thread.start()
 
     def close(self):
-        self._running = False
+        self._stop_event.set()
         if self._bg_thread.is_alive():
-            self._bg_thread.join(timeout=1.0)
+            self._bg_thread.join()
         self.env.close()
 
     def _background_loop(self):
         zero_action = np.zeros(self.env.action_space.shape, dtype=np.float32)
-        while self._running:
+        tick_period = 1.0 / self._tick_hz
+        next_tick = time.perf_counter()
+        while not self._stop_event.is_set():
             # Build an action consisting purely of velocities for each slice.
             action = zero_action.copy()
 
@@ -378,17 +380,20 @@ class ManiSkillEnv(RobotEnv):
                     )
 
                     for robot_actor_name, env_actor_name in success_events:
-                        print(
-                            f"[MONITOR] SUCCESS DETECTED: {robot_actor_name} contacted {env_actor_name}"
-                        )
+                        if not self._success_detected:
+                            print(
+                                f"[MONITOR] SUCCESS DETECTED: {robot_actor_name} contacted {env_actor_name}"
+                            )
                         self._success_detected = True
 
                     for robot_actor_name, env_actor_name in collision_events:
-                        print(
-                            f"[MONITOR] COLLISION DETECTED: {robot_actor_name} contacted {env_actor_name}"
-                        )
+                        collision_pair = (robot_actor_name, env_actor_name)
+                        if collision_pair not in self._collision_pairs:
+                            print(
+                                f"[MONITOR] COLLISION DETECTED: {robot_actor_name} contacted {env_actor_name}"
+                            )
                         self._collision_detected = True
-                        self._collision_pairs.add((robot_actor_name, env_actor_name))
+                        self._collision_pairs.add(collision_pair)
 
                     # Optional hold-stability metric: held without slipping for N seconds.
                     if (
@@ -424,10 +429,19 @@ class ManiSkillEnv(RobotEnv):
                         }
                     )
 
-            if getattr(self.env, "render_mode", None) == "human" and self._running:
+            if (
+                getattr(self.env, "render_mode", None) == "human"
+                and not self._stop_event.is_set()
+            ):
                 with self._env_lock:
                     self.env.render()
-            time.sleep(1.0 / self._tick_hz)
+
+            next_tick += tick_period
+            sleep_seconds = next_tick - time.perf_counter()
+            if sleep_seconds > 0.0:
+                self._stop_event.wait(sleep_seconds)
+            else:
+                next_tick = time.perf_counter()
 
     # ===== Sensors and state access (unchanged APIs) =====
     def _get_head_camera(self) -> Camera:
@@ -567,35 +581,30 @@ class ManiSkillEnv(RobotEnv):
         This prevents misalignment between sensor data and robot state.
         """
         with self._lock:
-            # Read ALL state from current obs atomically
+            # Capture one immutable observation reference atomically. Tensor
+            # transfers happen after releasing the control-loop lock.
             obs_snapshot = self.obs
 
-            # Extract depth
-            depth_data = obs_snapshot["sensor_data"]["fetch_head"]["depth"]
-            if isinstance(depth_data, torch.Tensor):
-                depth_data = depth_data.detach().cpu().numpy()
-            depth = depth_data[0, ..., 0].astype(np.float32) / 1000.0
+        depth_data = obs_snapshot["sensor_data"]["fetch_head"]["depth"]
+        if isinstance(depth_data, torch.Tensor):
+            depth_data = depth_data.detach().cpu().numpy()
+        depth = depth_data[0, ..., 0].astype(np.float32) / 1000.0
 
-            # Extract RGB
-            rgb_data = obs_snapshot["sensor_data"]["fetch_head"]["rgb"]
-            if isinstance(rgb_data, torch.Tensor):
-                rgb_data = rgb_data.detach().cpu().numpy()
-            rgb = rgb_data[0]
+        rgb_data = obs_snapshot["sensor_data"]["fetch_head"]["rgb"]
+        if isinstance(rgb_data, torch.Tensor):
+            rgb_data = rgb_data.detach().cpu().numpy()
+        rgb = rgb_data[0]
 
-            # Extract joint states
-            qpos = obs_snapshot["state"]
-            if isinstance(qpos, torch.Tensor):
-                qpos = qpos.detach().cpu().numpy()
-            if qpos.ndim == 2:
-                qpos = qpos[0]
+        qpos = obs_snapshot["state"]
+        if isinstance(qpos, torch.Tensor):
+            qpos = qpos.detach().cpu().numpy()
+        if qpos.ndim == 2:
+            qpos = qpos[0]
 
-            # Extract segmentation
-            segmentation_data = obs_snapshot["sensor_data"]["fetch_head"][
-                "segmentation"
-            ]
-            if isinstance(segmentation_data, torch.Tensor):
-                segmentation_data = segmentation_data.detach().cpu().numpy()
-            segmentation = segmentation_data[0]
+        segmentation_data = obs_snapshot["sensor_data"]["fetch_head"]["segmentation"]
+        if isinstance(segmentation_data, torch.Tensor):
+            segmentation_data = segmentation_data.detach().cpu().numpy()
+        segmentation = segmentation_data[0]
 
         # Get joint names (doesn't depend on obs)
         with self._env_lock:
