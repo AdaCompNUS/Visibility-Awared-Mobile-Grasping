@@ -9,14 +9,15 @@ from grasp_anywhere.data_collector.trajectory_collector import (
     episode_finish,
     episode_record,
 )
+from grasp_anywhere.data_collector.viz_data_collector import VizDataCollector
 from grasp_anywhere.dataclass.datacollector.config import DataCollectionConfig
 from grasp_anywhere.dataclass.reachability_map import (
     CapabilityMap,
     ReachabilityMap,
 )
 from grasp_anywhere.dataclass.torso_map import TorsoMap
-from grasp_anywhere.data_collector.viz_data_collector import VizDataCollector
 from grasp_anywhere.grasping_client.grasp_generation import predict_grasps
+from grasp_anywhere.grasping_client.sam_client import SamClient, SamConfig
 from grasp_anywhere.stage_planners.confirm_stage import ConfirmPlanner
 from grasp_anywhere.stage_planners.grasp_stage import GraspPlanner
 from grasp_anywhere.stage_planners.move_stage import MovePlanner
@@ -27,7 +28,6 @@ from grasp_anywhere.stage_planners.static_point_stage import StaticPointPlanner
 from grasp_anywhere.utils.grasp_utils import select_diverse_grasps
 from grasp_anywhere.utils.logger import log
 from grasp_anywhere.utils.perception_utils import get_pcd_from_mask
-from grasp_anywhere.grasping_client.sam_client import SamClient, SamConfig
 from grasp_anywhere.utils.seg_utils import mask_from_segmentation_id, mask_from_uv
 from grasp_anywhere.utils.visualization_utils import (
     visualize_grasps,
@@ -210,7 +210,10 @@ class Scheduler:
                     head_qpos=head_qpos,
                 )
 
-                # Compute camera pose from joint states snapshot (uses FK)
+                # Compute synchronized camera poses directly from Fetch FK.
+                camera_pose_base = self.robot.compute_camera_pose_in_base_from_joints(
+                    joint_dict
+                )
                 camera_extrinsic = self.robot.compute_camera_pose_from_joints(
                     joint_dict
                 )
@@ -367,19 +370,19 @@ class Scheduler:
                                 depth,
                                 camera_intrinsic,
                             )
-                        # Transform grasp poses to world frame
-                        grasp_poses_world = [
-                            camera_extrinsic @ g for g in pred_grasps_cam
+                        # Keep grasp geometry in base_link to avoid global-pose drift.
+                        grasp_poses_base = [
+                            camera_pose_base @ g for g in pred_grasps_cam
                         ]
 
                         max_tries = 3
                         # Select diverse grasps instead of just top-scored ones
                         diverse_indices = select_diverse_grasps(
-                            grasp_poses_world, max_tries
+                            grasp_poses_base, max_tries
                         )
                         total = len(diverse_indices)
                         for i, idx in enumerate(diverse_indices):
-                            pose = grasp_poses_world[idx]
+                            pose = grasp_poses_base[idx]
                             log.info(
                                 f"Trying grasp pose {i + 1}/{total} (original rank {idx + 1})"
                             )
@@ -387,6 +390,7 @@ class Scheduler:
                             # Recapture scene to handle robot movement between attempts
                             snapshot = self.robot.robot_env.get_sensor_snapshot()
                             current_extrinsic = camera_extrinsic
+                            current_camera_pose_base = camera_pose_base
 
                             if snapshot is not None:
                                 depth = snapshot["depth"]
@@ -429,6 +433,11 @@ class Scheduler:
                                         joint_dict
                                     )
                                 )
+                                current_camera_pose_base = (
+                                    self.robot.compute_camera_pose_in_base_from_joints(
+                                        joint_dict
+                                    )
+                                )
                                 self.robot.scene.update(
                                     depth,
                                     camera_intrinsic,
@@ -439,8 +448,9 @@ class Scheduler:
 
                             success, msg = self.grasp_planner.run(
                                 pose,
-                                current_extrinsic,
+                                current_camera_pose_base,
                                 self.robot.scene.current_environment(),
+                                pose_frame="base",
                             )
                             if success:
                                 log.info(f"Grasp successful on attempt {attempt + 1}")

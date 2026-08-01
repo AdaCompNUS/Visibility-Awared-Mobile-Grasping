@@ -5,11 +5,7 @@ import numpy as np
 
 from grasp_anywhere.robot import Fetch
 from grasp_anywhere.robot.ik import ikfast_compute_ik, trac_solve_arm_only
-from grasp_anywhere.robot.utils.transform_utils import (
-    extract_position_orientation,
-    transform_pose_to_base,
-    transform_pose_to_world,
-)
+from grasp_anywhere.robot.utils.transform_utils import extract_position_orientation
 from grasp_anywhere.utils import reachability_utils
 from grasp_anywhere.utils.logger import log
 from grasp_anywhere.utils.visualization_utils import visualize_grasp_pose_world
@@ -73,8 +69,8 @@ class GraspPlanner:
 
     def execute_grasp(
         self,
-        top_grasp_world_matrix,
-        camera_extrinsic,
+        top_grasp_base_matrix,
+        camera_pose_base,
         collision_points,
         use_active_perception=True,
     ):
@@ -94,11 +90,11 @@ class GraspPlanner:
 
                 if rgb is not None and depth is not None and K is not None:
                     visualize_grasp_pose_world(
-                        grasp_pose_world=top_grasp_world_matrix,
+                        grasp_pose_world=top_grasp_base_matrix,
                         rgb=rgb,
                         depth=depth,
                         K=K,
-                        camera_pose=camera_extrinsic,
+                        camera_pose=camera_pose_base,
                     )
                     log.info("Grasp pose visualization completed.")
                 else:
@@ -109,7 +105,7 @@ class GraspPlanner:
         # Motion to pre-grasp
 
         # pre pose 1
-        pre_grasp_matrix = top_grasp_world_matrix.copy()
+        pre_grasp_matrix = top_grasp_base_matrix.copy()
         approach_vector = pre_grasp_matrix[:3, 0]
         pre_grasp_matrix[:3, 3] -= 0.10 * approach_vector
         position, orientation = extract_position_orientation(pre_grasp_matrix)
@@ -119,7 +115,7 @@ class GraspPlanner:
         T_ee_to_grasp = np.array(
             [[0, 0, 1, 0], [1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1]]
         )
-        grasp_frame_matrix = top_grasp_world_matrix @ T_ee_to_grasp
+        grasp_frame_matrix = top_grasp_base_matrix @ T_ee_to_grasp
 
         # In grasp frame: x=approach, y=closing, z=normal
         # Create top-down pose in grasp frame
@@ -152,12 +148,8 @@ class GraspPlanner:
 
         position2, orientation2 = extract_position_orientation(pre_grasp_matrix2)
 
-        base_config = self.robot.get_base_config_from_camera_pose(camera_extrinsic)
-        if base_config is None:
-            log.warning(
-                "WARNING: Could not update base config from camera pose. Using default from TF."
-            )
-            base_config = self.robot.get_base_params()
+        ik_base_config = (0.0, 0.0, 0.0)
+        planning_base_config = self.robot.get_base_params()
 
         torso_pos = self.robot.get_torso_position()
         arm_seed = self.robot.get_arm_joint_values()
@@ -177,7 +169,7 @@ class GraspPlanner:
                         rgb=rgb,
                         depth=depth,
                         K=K,
-                        camera_pose=camera_extrinsic,
+                        camera_pose=camera_pose_base,
                     )
                     log.info("Pre grasp pose visualization completed.")
                 else:
@@ -187,11 +179,11 @@ class GraspPlanner:
 
         # Try pre pose 1 first, if it fails, try pre pose 2
         pre_grasp_joints = trac_solve_arm_only(
-            arm_seed, base_config, torso_pos, position, orientation
+            arm_seed, ik_base_config, torso_pos, position, orientation
         )
         if pre_grasp_joints is None:
             pre_grasp_joints = trac_solve_arm_only(
-                arm_seed, base_config, torso_pos, position2, orientation2
+                arm_seed, ik_base_config, torso_pos, position2, orientation2
             )
         if pre_grasp_joints:
             log.info(
@@ -211,18 +203,17 @@ class GraspPlanner:
             log.info(
                 "Fixed-base IK failed; attempting IKFast with collision checking..."
             )
-            self.robot.set_base_params(base_config[2], base_config[0], base_config[1])
+            self.robot.set_base_params(
+                planning_base_config[2],
+                planning_base_config[0],
+                planning_base_config[1],
+            )
 
             cand_pos_ori = [(position, orientation), (position2, orientation2)]
-            base_pos = [base_config[0], base_config[1], 0]
-            base_yaw = base_config[2]
 
             valid_solution = None
             for _ in range(20):
-                for pos_w, quat_w in cand_pos_ori:
-                    ee_pos, ee_quat = transform_pose_to_base(
-                        pos_w, quat_w, base_pos, base_yaw
-                    )
+                for ee_pos, ee_quat in cand_pos_ori:
                     from scipy.spatial.transform import Rotation as R
 
                     rot3 = R.from_quat(ee_quat).as_matrix()
@@ -266,13 +257,17 @@ class GraspPlanner:
 
         # Motion to final grasp
         grasp_position, grasp_orientation = extract_position_orientation(
-            top_grasp_world_matrix
+            top_grasp_base_matrix
         )
 
         # Use Cartesian interpolation for smooth straight-line end-effector motion
         log.info("Executing Cartesian interpolation to final grasp pose.")
         result = self.robot.send_cartesian_interpolated_motion(
-            grasp_position, grasp_orientation, duration=3.0, num_waypoints=20
+            grasp_position,
+            grasp_orientation,
+            duration=3.0,
+            num_waypoints=20,
+            target_frame="base",
         )
         if result is None:
             return False, "Failed to execute Cartesian motion to grasp pose."
@@ -288,15 +283,12 @@ class GraspPlanner:
         # Calculate lift target (Cartesian) from pre_grasp_joints (which are valid and reachable)
         pre_grasp_full_config = [torso_pos] + pre_grasp_joints
         pg_ee_pos_b, pg_ee_quat_b = self.robot.vamp_module.eefk(pre_grasp_full_config)
-        target_pre_pos, target_pre_quat = transform_pose_to_world(
-            [base_config[0], base_config[1], 0],
-            base_config[2],
+        result = self.robot.send_cartesian_interpolated_motion(
             pg_ee_pos_b,
             pg_ee_quat_b,
-        )
-
-        result = self.robot.send_cartesian_interpolated_motion(
-            target_pre_pos, target_pre_quat, duration=3.0, num_waypoints=20
+            duration=3.0,
+            num_waypoints=20,
+            target_frame="base",
         )
         if result is None:
             log.warning(
@@ -322,12 +314,34 @@ class GraspPlanner:
 
     def run(
         self,
-        grasp_pose_world,
+        grasp_pose,
         camera_pose,
         collision_points,
         use_active_perception=True,
+        pose_frame="world",
     ):
         print("=== Stage 2: Grasping started ===")
+
+        if pose_frame == "base":
+            grasp_pose_base = grasp_pose
+            camera_pose_base = camera_pose
+        elif pose_frame == "world":
+            base_x, base_y, base_yaw = self.robot.get_base_params()
+            cos_yaw = np.cos(base_yaw)
+            sin_yaw = np.sin(base_yaw)
+            T_world_base = np.array(
+                [
+                    [cos_yaw, -sin_yaw, 0.0, base_x],
+                    [sin_yaw, cos_yaw, 0.0, base_y],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            )
+            T_base_world = np.linalg.inv(T_world_base)
+            grasp_pose_base = T_base_world @ grasp_pose
+            camera_pose_base = T_base_world @ camera_pose
+        else:
+            raise ValueError(f"Unsupported grasp pose frame: {pose_frame}")
 
         # Visualize original grasp pose in pointcloud if visualization is enabled
         if self.enable_visualization:
@@ -340,11 +354,11 @@ class GraspPlanner:
 
                 if rgb is not None and depth is not None and K is not None:
                     visualize_grasp_pose_world(
-                        grasp_pose_world=grasp_pose_world,
+                        grasp_pose_world=grasp_pose_base,
                         rgb=rgb,
                         depth=depth,
                         K=K,
-                        camera_pose=camera_pose,
+                        camera_pose=camera_pose_base,
                     )
                     print("Original grasp pose visualization completed.")
                 else:
@@ -354,18 +368,18 @@ class GraspPlanner:
 
         if self.grasp_depth_offset != 0:
             print(f"Adjusting grasp pose forward by {self.grasp_depth_offset}m.")
-            approach_vector = grasp_pose_world[:3, 2]
-            grasp_pose_world[:3, 3] += approach_vector * self.grasp_depth_offset
+            approach_vector = grasp_pose_base[:3, 2]
+            grasp_pose_base[:3, 3] += approach_vector * self.grasp_depth_offset
 
         # Transformation from grasp frame to end-effector frame
         T_grasp_to_ee = np.array(
             [[0, 1, 0, 0], [0, 0, 1, 0], [1, 0, 0, 0], [0, 0, 0, 1]]
         )
-        top_grasp_ee_world = grasp_pose_world @ T_grasp_to_ee
+        top_grasp_ee_base = grasp_pose_base @ T_grasp_to_ee
 
         return self.execute_grasp(
-            top_grasp_ee_world,
-            camera_pose,
+            top_grasp_ee_base,
+            camera_pose_base,
             collision_points,
             use_active_perception=use_active_perception,
         )

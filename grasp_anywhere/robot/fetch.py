@@ -188,8 +188,8 @@ class Fetch:
                     and static_pcd_combined.shape[1] == 3
                 ):
                     pyrender_set_static_pointcloud(static_pcd_combined)
-        # Approx. forward from head
-        self.camera_mount_offset = np.array([0.0443, 0.0, 0.0394])
+        # head_tilt_link -> head_camera_link from the Fetch URDF, verified in TyGrit
+        self.camera_mount_offset = np.array([0.055, 0.0, 0.0225])
 
     def sample_wb_ik(
         self,
@@ -608,7 +608,14 @@ class Fetch:
             [base_x, base_y, 0], R.from_euler("z", base_theta).as_matrix()
         )
 
-        # Get planning joints with head for FK
+        T_base_camera = self.compute_camera_pose_in_base_from_joints(joint_dict)
+
+        # Combine
+        T_map_camera = T_map_base @ T_base_camera
+        return T_map_camera
+
+    def compute_camera_pose_in_base_from_joints(self, joint_dict):
+        """Compute the synchronized OpenCV camera pose in ``base_link``."""
         planning_joints_with_head = self.planning_joint_names + [
             "head_pan_joint",
             "head_tilt_joint",
@@ -624,11 +631,7 @@ class Fetch:
             self.camera_mount_offset,
             R.from_euler("xyz", [-np.pi / 2, 0, -np.pi / 2]).as_matrix(),
         )
-        T_base_camera = T_base_head_tilt @ T_head_tilt_camera
-
-        # Combine
-        T_map_camera = T_map_base @ T_base_camera
-        return T_map_camera
+        return T_base_head_tilt @ T_head_tilt_camera
 
     def _plan_arm(self, current_joints, target_joints):
         """Plan a path using VAMP motion planner for 8-DOF configuration."""
@@ -1077,7 +1080,6 @@ class Fetch:
 
         processing_time = time() - start_time
 
-
         # Update FCIT* XY bounds from the point cloud for whole-body planning.
         pts_np = np.array(points_to_use, dtype=np.float64)
         if pts_np.size > 0 and pts_np.shape[1] == 3:
@@ -1240,7 +1242,12 @@ class Fetch:
         )
 
     def send_cartesian_interpolated_motion(
-        self, target_ee_pos, target_ee_quat, duration=3.0, num_waypoints=5
+        self,
+        target_ee_pos,
+        target_ee_quat,
+        duration=3.0,
+        num_waypoints=5,
+        target_frame="world",
     ):
         """
         Move to target end-effector pose via Cartesian interpolation mapped to joint space.
@@ -1253,10 +1260,11 @@ class Fetch:
         This avoids joint wrapping issues and ensures smooth Cartesian paths.
 
         Args:
-            target_ee_pos: Target end-effector position [x, y, z] in world frame.
-            target_ee_quat: Target end-effector orientation [x, y, z, w] quaternion in world frame.
+            target_ee_pos: Target end-effector position [x, y, z].
+            target_ee_quat: Target end-effector orientation [x, y, z, w].
             duration: Time to execute trajectory (default: 3.0s)
             num_waypoints: Number of Cartesian waypoints to generate (default: 20)
+            target_frame: Frame for the target pose (``"world"`` or ``"base"``).
 
         Returns:
             Result from action client, or None on failure
@@ -1279,22 +1287,30 @@ class Fetch:
             current_full_config
         )
 
-        # Transform current EE pose to world frame
-        (
-            current_ee_pos_world,
-            current_ee_quat_world,
-        ) = transform_utils.transform_pose_to_world(
-            [base_config[0], base_config[1], 0],
-            base_config[2],
-            current_ee_pos_base,
-            current_ee_quat_base,
-        )
-
-        target_ee_pos_world = target_ee_pos
-        target_ee_quat_world = target_ee_quat
+        if target_frame == "base":
+            current_ee_pos_frame = current_ee_pos_base
+            current_ee_quat_frame = current_ee_quat_base
+            target_ee_pos_frame = target_ee_pos
+            target_ee_quat_frame = target_ee_quat
+            ik_base_config = (0.0, 0.0, 0.0)
+        elif target_frame == "world":
+            (
+                current_ee_pos_frame,
+                current_ee_quat_frame,
+            ) = transform_utils.transform_pose_to_world(
+                [base_config[0], base_config[1], 0],
+                base_config[2],
+                current_ee_pos_base,
+                current_ee_quat_base,
+            )
+            target_ee_pos_frame = target_ee_pos
+            target_ee_quat_frame = target_ee_quat
+            ik_base_config = base_config
+        else:
+            raise ValueError(f"Unsupported Cartesian target frame: {target_frame}")
 
         # Create SLERP interpolator for orientation
-        key_rots = R.from_quat([current_ee_quat_world, target_ee_quat_world])
+        key_rots = R.from_quat([current_ee_quat_frame, target_ee_quat_frame])
         key_times = [0, 1]
         slerp = Slerp(key_times, key_rots)
 
@@ -1306,8 +1322,8 @@ class Fetch:
         for i, alpha in enumerate(alphas):
             # Interpolate position (linear) and orientation (SLERP)
             interp_pos = (1 - alpha) * np.array(
-                current_ee_pos_world
-            ) + alpha * np.array(target_ee_pos_world)
+                current_ee_pos_frame
+            ) + alpha * np.array(target_ee_pos_frame)
             interp_rot = slerp(alpha)
             interp_quat = interp_rot.as_quat()
 
@@ -1315,7 +1331,7 @@ class Fetch:
             # Use fixed_base_arm solver which includes torso (8-DOF)
             ik_solution = trac_solve_fixed_base_arm(
                 seed,
-                base_config,
+                ik_base_config,
                 interp_pos.tolist(),
                 interp_quat.tolist(),
             )
