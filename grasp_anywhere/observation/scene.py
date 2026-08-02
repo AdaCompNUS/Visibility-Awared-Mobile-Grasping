@@ -45,10 +45,7 @@ class Scene:
             else np.empty((0, 3), dtype=np.float32)
         )
 
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(raw_s)
-        pcd = pcd.voxel_down_sample(voxel_size=downsample_voxel_size)
-        self._S = np.asarray(pcd.points, dtype=np.float32)
+        self._S = self._downsample_occupied_voxels(raw_s, downsample_voxel_size)
 
         self._M = np.empty((0, 3), dtype=np.float32)
         self._G = np.empty((0, 3), dtype=np.float32)
@@ -212,8 +209,10 @@ class Scene:
         T = np.asarray(T_wc).reshape(4, 4)
         zmin, zmax = z_range or self.default_depth_range
 
-        # Use shared depth-to-pointcloud util for consistency across codebase
-        pc_cam, _ = depth2pc(depth, K, stride=4)
+        # Keep the complete depth image until occupied-voxel downsampling in the
+        # planning frame. Image-space decimation can drop thin obstacles before
+        # their occupied cells are identified.
+        pc_cam, _ = depth2pc(depth, K, voxel_size=0.0)
         if pc_cam is None or len(pc_cam) == 0:
             return np.empty((0, 3), dtype=np.float32)
 
@@ -227,6 +226,35 @@ class Scene:
         t = T[:3, 3].astype(np.float32)
         pc_world = (pc_cam.astype(np.float32) @ R.T) + t
         return pc_world.astype(np.float32)
+
+    @staticmethod
+    def _downsample_occupied_voxels(
+        points: np.ndarray, voxel_size: float
+    ) -> np.ndarray:
+        """Represent every occupied voxel without averaging surface samples."""
+        pts = np.asarray(points, dtype=np.float32)
+        if len(pts) == 0 or voxel_size <= 0.0:
+            return pts
+
+        q = np.float32(voxel_size)
+        voxel_keys = np.floor(pts / q).astype(np.int64)
+        shifted_keys = voxel_keys - voxel_keys.min(axis=0)
+        grid_shape = shifted_keys.max(axis=0) + 1
+        linear_keys = (
+            shifted_keys[:, 0] * grid_shape[1] + shifted_keys[:, 1]
+        ) * grid_shape[2] + shifted_keys[:, 2]
+        _, first_indices, counts = np.unique(
+            linear_keys,
+            return_index=True,
+            return_counts=True,
+        )
+
+        representatives = pts[first_indices].copy()
+        dense_voxels = counts > 1
+        representatives[dense_voxels] = (
+            voxel_keys[first_indices[dense_voxels]].astype(np.float32) + 0.5
+        ) * q
+        return representatives
 
     @staticmethod
     def _crop_sphere(
@@ -279,42 +307,9 @@ class Scene:
 
     @staticmethod
     def _merge_dedup(base: np.ndarray, add: np.ndarray, radius: float) -> np.ndarray:
-        if len(add) == 0:
-            return base
-        if len(base) == 0:
-            return add
-
-        # Use a voxel grid to deduplicate points.
-        q = max(radius, 1e-6)
-
-        # Optimized vectorized implementation
-        # 1. Compute voxel keys for base points
-        base_keys = np.floor(base / q).astype(np.int64)
-
-        # 2. Compute voxel keys for add points
-        add_keys = np.floor(add / q).astype(np.int64)
-
-        # 3. Stack keys: base first, then add
-        all_keys = np.vstack((base_keys, add_keys))
-
-        # 4. Find unique voxels. np.unique with return_index=True returns the index of the first occurrence.
-        # Since base keys are first, any voxel occupied by base will point to an index < len(base).
-        # Any voxel occupied ONLY by add (or new in add) will have an index >= len(base).
-        _, unique_indices = np.unique(all_keys, axis=0, return_index=True)
-
-        # 5. Select indices that correspond to the 'add' array (new voxels)
-        n_base = len(base)
-        # Filter indices pointing to the 'add' section
-        add_indices = unique_indices[unique_indices >= n_base] - n_base
-
-        if len(add_indices) == 0:
-            return base
-
-        # 6. Sort indices to preserve relative order
-        add_indices.sort()
-
-        # 7. Stack base with the selected new points from add
-        return np.vstack((base, add[add_indices]))
+        return Scene._downsample_occupied_voxels(
+            np.vstack((base, add)), max(radius, 1e-6)
+        )
 
     def _update_core(
         self,
@@ -359,11 +354,9 @@ class Scene:
             else:
                 M = np.vstack((M, pcd_world))
 
-            # Downsample to prevent excessive density
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(M)
-            pcd = pcd.voxel_down_sample(voxel_size=self.downsample_voxel_size)
-            M = np.asarray(pcd.points, dtype=np.float32)
+            # Downsample to prevent excessive density while retaining every
+            # occupied planning cell.
+            M = self._downsample_occupied_voxels(M, self.downsample_voxel_size)
 
             self._M = M
             self._environment_cache = None
@@ -497,6 +490,11 @@ class Scene:
             pts = pts[pts[:, 2] > self.ground_z_threshold]
             if pts.shape[0] == 0:
                 return pts
+
+        # Use occupied cells in the planning frame. With the configured 3 cm
+        # voxels and 3 cm VAMP collision spheres, a sphere at a cell center
+        # covers the complete cell (half-diagonal is about 2.6 cm).
+        pts = self._downsample_occupied_voxels(pts, self.downsample_voxel_size)
 
         # Robot self filter with synchronized state
         if pts.shape[0] > 0:

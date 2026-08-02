@@ -127,7 +127,8 @@ class Fetch:
         scene_mode = env_config.get("scene_mode", scene_mode)
         self.scene = Scene(
             static_map_pcd=static_pcd_combined,
-            downsample_voxel_size=0.05,  # Voxel size from action_interface.py
+            # Keep occupied cells within the 3 cm collision-sphere coverage.
+            downsample_voxel_size=0.03,
             mode=scene_mode,
             robot_filter=self.filter_points_on_robot_with_state,
             ground_z_threshold=env_config.get("ground_z_threshold", 0.3),
