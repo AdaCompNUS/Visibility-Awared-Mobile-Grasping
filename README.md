@@ -96,8 +96,7 @@ library used by this codebase.
 ## External Services
 
 The grasp generation client expects a local HTTP service at
-`http://localhost:4003`. It must expose `/sample_grasp` and
-`/sample_grasp_with_context`.
+`http://localhost:4003`. It must expose `/sample_grasp`.
 
 Perception services (GraspNet, OWL-ViT, SAM) are provided as a git submodule
 under [`third_party/perception_services`](third_party/perception_services/README.md).
@@ -161,14 +160,6 @@ python experiments/run_real_robot.py \
 
 ## Benchmark
 
-### Generate a Benchmark
-
-```bash
-python tools/generate_grasp_benchmark.py \
-    --generate \
-    --output_path resources/grasp_benchmark.json
-```
-
 ### Run the Benchmark
 
 Single run with GPU selection and optional trajectory saving:
@@ -206,16 +197,6 @@ Sweep dynamic obstacle trigger distances (0.5 m -- 3.0 m) with repeated trials:
 
 # Or specify GPUs
 ./scripts/run_trigger_distance_experiment.sh 2,3,4,5
-```
-
-### Visualize Results
-
-```bash
-# Benchmark scene visualization
-python tools/visualize_benchmark.py
-
-# Result distribution plots
-python tools/visualize_benchmark_distribution.py results/benchmark_results.json
 ```
 
 ## Configuration

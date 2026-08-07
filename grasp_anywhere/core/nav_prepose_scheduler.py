@@ -11,6 +11,7 @@ Flow:
 4. Look at the object
 5. Perform manipulation (perception + grasp)
 """
+
 import time
 from typing import Optional
 
@@ -24,6 +25,7 @@ from grasp_anywhere.dataclass.reachability_map import (
 )
 from grasp_anywhere.dataclass.torso_map import TorsoMap
 from grasp_anywhere.grasping_client.grasp_generation import predict_grasps
+from grasp_anywhere.grasping_client.sam_client import SamClient, SamConfig
 from grasp_anywhere.samplers.prepose_sampler import PreposeSampler
 from grasp_anywhere.stage_planners.grasp_stage import GraspPlanner
 from grasp_anywhere.stage_planners.move_stage import MovePlanner
@@ -31,8 +33,6 @@ from grasp_anywhere.stage_planners.place_stage import PlacePlanner
 from grasp_anywhere.utils.grasp_utils import select_diverse_grasps
 from grasp_anywhere.utils.logger import log
 from grasp_anywhere.utils.navigation_utils import get_current_pcd, navigate
-from grasp_anywhere.utils.perception_utils import get_pcd_from_mask
-from grasp_anywhere.grasping_client.sam_client import SamClient, SamConfig
 from grasp_anywhere.utils.seg_utils import mask_from_segmentation_id
 from grasp_anywhere.utils.visualization_utils import visualize_grasps
 
@@ -319,9 +319,9 @@ class NavPreposeScheduler:
                     else:
                         segmap = self.sam_client.segment_point(rgb, (u, v))
                 elif "segmentation" in snapshot:
-                    segmap = segment_object(rgb, (u, v))
+                    segmap = self.sam_client.segment_point(rgb, (u, v))
                 else:
-                    segmap = segment_object(rgb, (u, v))
+                    segmap = self.sam_client.segment_point(rgb, (u, v))
 
         if segmap is None or np.count_nonzero(segmap) == 0:
             log.warning("Could not segment object. Perception Failure.")
@@ -329,21 +329,13 @@ class NavPreposeScheduler:
 
         segmap = segmap.astype(np.uint8)
 
-        # Prepare point clouds
-        full_pcd_cam, segment_pcd_cam = self._prepare_pointclouds_for_grasping(
-            depth, segmap, camera_intrinsic, current_extrinsic, joint_dict
-        )
-
         # Predict Grasps
         pred_grasps_cam, scores = predict_grasps(
             self.grasping_config,
-            full_pc=full_pcd_cam,
-            segment_pc=segment_pcd_cam,
             rgb=rgb,
             depth=depth,
             segmap=segmap,
             K=camera_intrinsic,
-            visualize=self.enable_visualization,
         )
 
         if pred_grasps_cam is None or len(pred_grasps_cam) == 0:
@@ -377,42 +369,3 @@ class NavPreposeScheduler:
 
         log.error("All grasp attempts failed.")
         return False, "GRASP_EXECUTION_FAILED"
-
-    def _prepare_pointclouds_for_grasping(
-        self, depth, segmap, K, camera_extrinsic, joint_dict
-    ):
-        """Prepare full and segment point clouds for grasp prediction."""
-        # 1. Full PCD
-        full_mask = np.ones(depth.shape, dtype=bool)
-        full_pcd_cam = get_pcd_from_mask(depth, full_mask, K)
-
-        if full_pcd_cam is None or len(full_pcd_cam) == 0:
-            # Return empty arrays if no points
-            return np.empty((0, 3)), np.empty((0, 3))
-
-        # Transform to world to filter
-        full_pcd_cam_h = np.hstack((full_pcd_cam, np.ones((full_pcd_cam.shape[0], 1))))
-        full_pcd_world = (camera_extrinsic @ full_pcd_cam_h.T).T[:, :3]
-
-        # Filter robot
-        filtered_world_list, _ = self.robot.filter_points_on_robot_with_state(
-            full_pcd_world, joint_dict, point_radius=0.04
-        )
-        filtered_world = np.array(filtered_world_list)
-
-        # Back to camera
-        if len(filtered_world) == 0:
-            full_pcd_cam_filtered = np.empty((0, 3))
-        else:
-            filtered_world_h = np.hstack(
-                (filtered_world, np.ones((filtered_world.shape[0], 1)))
-            )
-            T_cam_world = np.linalg.inv(camera_extrinsic)
-            full_pcd_cam_filtered = (T_cam_world @ filtered_world_h.T).T[:, :3]
-
-        # 2. Segment PCD
-        object_pcd_cam = get_pcd_from_mask(depth, segmap.astype(bool), K)
-        if object_pcd_cam is None:
-            object_pcd_cam = np.empty((0, 3))
-
-        return full_pcd_cam_filtered, object_pcd_cam

@@ -104,7 +104,7 @@ def process_single_scene(args):
     import sapien
 
     from grasp_anywhere.core.closed_loop_scheduler import ClosedLoopScheduler
-    from grasp_anywhere.core.nav_manip_scheduler import TUCK_JOINTS, NavManipScheduler
+    from grasp_anywhere.core.nav_manip_scheduler import NavManipScheduler
     from grasp_anywhere.core.nav_prepose_scheduler import NavPreposeScheduler
     from grasp_anywhere.core.scheduler import Scheduler
     from grasp_anywhere.core.sequential_scheduler import SequentialScheduler
@@ -183,30 +183,6 @@ def process_single_scene(args):
 
         # Reset environment for this task
         sim_env.reset(seed=seed)
-        env = sim_env.env.unwrapped
-        agent = env.agent
-        with sim_env._env_lock:
-            qpos = np.asarray(agent.keyframes["rest"].qpos, dtype=np.float32).copy()
-            joint_names = [joint.name for joint in agent.robot.active_joints]
-            qpos[joint_names.index(agent.base_joint_names[2])] = np.deg2rad(-35.0)
-            for joint_name, position in zip(
-                (
-                    "torso_lift_joint",
-                    "shoulder_pan_joint",
-                    "shoulder_lift_joint",
-                    "upperarm_roll_joint",
-                    "elbow_flex_joint",
-                    "forearm_roll_joint",
-                    "wrist_flex_joint",
-                    "wrist_roll_joint",
-                ),
-                TUCK_JOINTS,
-            ):
-                qpos[joint_names.index(joint_name)] = position
-            agent.reset(qpos)
-            fresh_obs = env.get_obs()
-        with sim_env._lock:
-            sim_env.obs = fresh_obs
 
         # Place ALL YCB objects in the scene
         object_actors = {}

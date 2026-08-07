@@ -275,13 +275,6 @@ def main():
                     # 11-dof = b + a
                     traj_11dof.append(list(b) + list(a))
 
-                # 2. Init Optimizer
-                # We need a mock robot or just use fetch_robot since optimizer calls point_head_at
-                # (which we won't execute live here).
-                # Actually optimizer.update() calls robot.point_head_at().
-                # We can monkeypatch it or just calculate manually.
-                # BETTER: Use optimizer._compute_weighted_target() directly!
-
                 optimizer = GazeOptimizer(
                     fetch_robot, lookahead_window=20, decay_rate=0.95
                 )

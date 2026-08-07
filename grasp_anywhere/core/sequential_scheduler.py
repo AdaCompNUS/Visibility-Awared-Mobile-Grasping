@@ -25,7 +25,6 @@ from grasp_anywhere.stage_planners.point_stage import PointPlanner
 from grasp_anywhere.stage_planners.prepose_stage import PreposePlanner
 from grasp_anywhere.stage_planners.static_point_stage import StaticPointPlanner
 from grasp_anywhere.utils.logger import log
-from grasp_anywhere.utils.perception_utils import get_pcd_from_mask
 from grasp_anywhere.utils.seg_utils import mask_from_segmentation_id, mask_from_uv
 from grasp_anywhere.utils.visualization_utils import (
     visualize_grasps,
@@ -262,21 +261,13 @@ class SequentialScheduler:
             self._cleanup_episode()
             return False, "PERCEPTION_FAILURE"
 
-        # Prepare point clouds for grasp prediction
-        full_pcd_cam, segment_pcd_cam = self._prepare_pointclouds_for_grasping(
-            depth, segmap, camera_intrinsic, current_extrinsic, joint_dict
-        )
-
         # Predict Grasps
         pred_grasps_cam, scores = predict_grasps(
             self.grasping_config,
-            full_pc=full_pcd_cam,
-            segment_pc=segment_pcd_cam,
             rgb=rgb,
             depth=depth,
             segmap=segmap,
             K=camera_intrinsic,
-            visualize=self.enable_visualization,
         )
 
         if pred_grasps_cam is None or len(pred_grasps_cam) == 0:
@@ -399,32 +390,3 @@ class SequentialScheduler:
         if mask is not None and np.count_nonzero(mask) > 0:
             return mask.astype(np.uint8)
         return None
-
-    def _prepare_pointclouds_for_grasping(
-        self, depth, segmap, K, camera_extrinsic, joint_dict
-    ):
-        # 1. Full PCD
-        full_mask = np.ones(depth.shape, dtype=bool)
-        full_pcd_cam = get_pcd_from_mask(depth, full_mask, K)
-
-        # Transform to world to filter
-        full_pcd_cam_h = np.hstack((full_pcd_cam, np.ones((full_pcd_cam.shape[0], 1))))
-        full_pcd_world = (camera_extrinsic @ full_pcd_cam_h.T).T[:, :3]
-
-        # Filter robot
-        filtered_world_list, _ = self.robot.filter_points_on_robot_with_state(
-            full_pcd_world, joint_dict, point_radius=0.04
-        )
-        filtered_world = np.array(filtered_world_list)
-
-        # Back to camera
-        filtered_world_h = np.hstack(
-            (filtered_world, np.ones((filtered_world.shape[0], 1)))
-        )
-        T_cam_world = np.linalg.inv(camera_extrinsic)
-        full_pcd_cam_filtered = (T_cam_world @ filtered_world_h.T).T[:, :3]
-
-        # 2. Segment PCD
-        object_pcd_cam = get_pcd_from_mask(depth, segmap.astype(bool), K)
-
-        return full_pcd_cam_filtered, object_pcd_cam
