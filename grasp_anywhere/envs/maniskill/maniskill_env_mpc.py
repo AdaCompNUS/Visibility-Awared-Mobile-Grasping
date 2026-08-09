@@ -338,7 +338,8 @@ class ManiSkillEnv(RobotEnv):
             action = np.nan_to_num(action, nan=0.0)
             with self._env_lock:
                 obs, reward, terminated, truncated, info = self.env.step(action)
-                dt = self.env.unwrapped.scene.px.timestep
+                # Dynamic actors advance once per control step, not per substep.
+                dt = self.env.unwrapped.control_timestep
 
             with self._lock:
                 self.obs = obs
@@ -626,6 +627,13 @@ class ManiSkillEnv(RobotEnv):
         if len(arm_path) != len(base_configs):
             raise ValueError("Arm path and base configs must have the same length.")
 
+        navigation_goal = None
+        if len(base_configs) > 1:
+            base_start = np.asarray(base_configs[0], dtype=np.float32)
+            base_goal = np.asarray(base_configs[-1], dtype=np.float32)
+            if np.linalg.norm(base_goal[:2] - base_start[:2]) > 0.1:
+                navigation_goal = base_goal
+
         merged: List[np.ndarray] = []
         for i in range(len(arm_path)):
             waypoint = list(arm_path[i])
@@ -652,6 +660,8 @@ class ManiSkillEnv(RobotEnv):
                 # Planned path: replace queue and reset index
                 self._merged_traj = list(merged)
                 self._last_waypoint_idx = 0
+            if navigation_goal is not None:
+                self.benchmark_manager.set_navigation_goal(navigation_goal)
         return True
 
     def start_whole_body_motion(self, arm_path: List, base_configs: List) -> bool:
