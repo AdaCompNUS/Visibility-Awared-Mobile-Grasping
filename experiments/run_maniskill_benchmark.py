@@ -88,6 +88,7 @@ def process_single_scene(args):
         force_no_render,
         save_trajectory,
         trajectory_dir,
+        task_ids,
     ) = args
 
     with open(config_path, "r") as f:
@@ -132,6 +133,11 @@ def process_single_scene(args):
             "perception_failure": 0,
             "planning_failures": 0,
             "ik_failures": 0,
+            "dynamic_tasks": 0,
+            "dynamic_obstacle_spawned_tasks": 0,
+            "dynamic_path_affected_tasks": 0,
+            "dynamic_replans": 0,
+            "dynamic_interaction_failures": 0,
         }
     }
 
@@ -167,6 +173,8 @@ def process_single_scene(args):
 
     # For each grasp task, run with trials and evaluation
     for task_idx, task in enumerate(grasp_tasks):
+        if task_ids is not None and task_idx not in task_ids:
+            continue
         # if task_idx != 18:
         #     continue
         log.info(f"Task {task_idx+1}/{len(grasp_tasks)}: {task['model_id']}")
@@ -213,6 +221,38 @@ def process_single_scene(args):
         sim_env.benchmark_manager.nav_trigger_distance = float(
             benchmark_cfg.get("nav_trigger_distance", 1.7)
         )
+        dynamic_manager_settings = {
+            "nav_obstacle_speed": ("obstacle_speed", float),
+            "nav_obstacle_xy_scale": ("nav_obstacle_xy_scale", float),
+            "nav_obstacle_min_xy_scale": (
+                "nav_obstacle_min_xy_scale",
+                float,
+            ),
+            "nav_spawn_preferred_distance": (
+                "nav_spawn_preferred_distance",
+                float,
+            ),
+            "nav_spawn_distance_min": ("nav_spawn_distance_min", float),
+            "nav_spawn_distance_max": ("nav_spawn_distance_max", float),
+            "nav_path_change_threshold": (
+                "nav_path_change_threshold",
+                float,
+            ),
+            "enable_manipulation_obstacles": (
+                "enable_manipulation_obstacles",
+                bool,
+            ),
+        }
+        for config_key, (
+            manager_attribute,
+            value_type,
+        ) in dynamic_manager_settings.items():
+            if config_key in benchmark_cfg:
+                setattr(
+                    sim_env.benchmark_manager,
+                    manager_attribute,
+                    value_type(benchmark_cfg[config_key]),
+                )
         # Pass dynamic obstacle config if available for the current task
         dynamic_obstacle_config = task.get("dynamic_obstacle")
         if dynamic_obstacle_config:
@@ -272,6 +312,7 @@ def process_single_scene(args):
         success, message = scheduler.grasp_anywhere(
             object_pcd, max_attempts=5, target_model_id=target_actor_name
         )
+        sim_env.raise_if_background_failed()
 
         # Arm the hold timer AFTER the grasp stage (which includes lifting back to pre-grasp).
         sim_env.arm_hold_monitoring()
@@ -286,6 +327,7 @@ def process_single_scene(args):
                 )
             )
         )
+        sim_env.raise_if_background_failed()
 
         # Stop monitoring and get results
         sim_env.stop_monitoring()
@@ -305,6 +347,28 @@ def process_single_scene(args):
         task_result["success"] = bool(has_hold_success) and not has_collision
         task_result["hold_success"] = bool(has_hold_success)
 
+        dynamic_requirement_failed = False
+        if sim_env.benchmark_manager.enabled:
+            dynamic_metrics = sim_env.benchmark_manager.get_task_metrics()
+            task_result["dynamic_metrics"] = dynamic_metrics
+            task_result["dynamic_path_affected"] = bool(dynamic_metrics["path_changed"])
+            results["summary"]["dynamic_tasks"] += 1
+            if dynamic_metrics["obstacle_spawned"]:
+                results["summary"]["dynamic_obstacle_spawned_tasks"] += 1
+            if dynamic_metrics["path_changed"]:
+                results["summary"]["dynamic_path_affected_tasks"] += 1
+            results["summary"]["dynamic_replans"] += int(
+                dynamic_metrics["replan_count"]
+            )
+
+            require_path_change = bool(
+                benchmark_cfg.get("require_dynamic_path_change", True)
+            )
+            if require_path_change and not task_result["dynamic_path_affected"]:
+                task_result["success"] = False
+                dynamic_requirement_failed = True
+                results["summary"]["dynamic_interaction_failures"] += 1
+
         # Save trajectory if enabled
         if save_trajectory:
             trajectory = sim_env.stop_trajectory_recording()
@@ -320,7 +384,9 @@ def process_single_scene(args):
             results["summary"]["successful_tasks"] += 1
         else:
             results["summary"]["failed_tasks"] += 1
-            if has_collision:
+            if dynamic_requirement_failed:
+                task_result["failure_reason"] = "dynamic_path_unaffected"
+            elif has_collision:
                 task_result["failure_reason"] = "collision"
                 results["summary"]["collision_failures"] += 1
             elif success:  # Grasp stage returns success but hold stage fails
@@ -353,6 +419,13 @@ def process_single_scene(args):
             f"Task {task_idx+1} result: {'SUCCESS' if task_result['success'] else 'FAILED'} | "
             f"Collision Free: {not has_collision} | Hold success: {task_result['hold_success']}"
         )
+        if sim_env.benchmark_manager.enabled:
+            log.info(
+                "Dynamic obstacle: "
+                f"spawned={task_result['dynamic_metrics']['obstacle_spawned']} | "
+                f"path_changed={task_result['dynamic_path_affected']} | "
+                f"replans={task_result['dynamic_metrics']['replan_count']}"
+            )
 
         # Save results incrementally (Disabled in worker)
         # with open(results_file, "w") as f:
@@ -399,6 +472,11 @@ def run_benchmark() -> None:
             "perception_failure": 0,
             "planning_failures": 0,
             "ik_failures": 0,
+            "dynamic_tasks": 0,
+            "dynamic_obstacle_spawned_tasks": 0,
+            "dynamic_path_affected_tasks": 0,
+            "dynamic_replans": 0,
+            "dynamic_interaction_failures": 0,
         },
     }
 
@@ -437,7 +515,28 @@ def run_benchmark() -> None:
         default="2,3",
         help="Comma-separated list of GPU IDs to use (default: 2,3)",
     )
+    parser.add_argument(
+        "--scenes",
+        nargs="+",
+        default=None,
+        help="Optional scene IDs for a diagnostic/calibration subset",
+    )
+    parser.add_argument(
+        "--task-ids",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Optional zero-based task IDs within each selected scene",
+    )
     args = parser.parse_args()
+
+    if args.scenes is not None:
+        unknown_scenes = sorted(set(args.scenes) - set(benchmark_data))
+        if unknown_scenes:
+            parser.error(f"Unknown scene IDs: {', '.join(unknown_scenes)}")
+        benchmark_data = {
+            scene_id: benchmark_data[scene_id] for scene_id in args.scenes
+        }
 
     config_path: str = args.config
 
@@ -492,9 +591,16 @@ def run_benchmark() -> None:
         "config_path": config_path,
         "scheduler_type": scheduler_type,
         "method_name": method_name,
+        "replanning_check_interval_s": run_config.get("planning", {}).get(
+            "replanning_check_interval_s",
+            0.5,
+        ),
         "nav_trigger_distance": run_config.get("benchmark", {}).get(
             "nav_trigger_distance", 1.7
         ),
+        "benchmark": run_config.get("benchmark", {}),
+        "scenes": args.scenes,
+        "task_ids": args.task_ids,
     }
     log.info(f"Method: {method_name} | Results will be saved to: {run_dir}")
 
@@ -506,6 +612,7 @@ def run_benchmark() -> None:
             args.parallel,
             args.save_trajectory,
             trajectory_dir,
+            args.task_ids,
         )
         for scene_id, scene_data in benchmark_data.items()
     ]
@@ -578,6 +685,17 @@ def run_benchmark() -> None:
         f"Planning failures: {results['summary']['planning_failures']} | "
         f"IK failures: {results['summary']['ik_failures']}"
     )
+    if results["summary"]["dynamic_tasks"]:
+        log.info(
+            "Dynamic interaction: "
+            f"spawned={results['summary']['dynamic_obstacle_spawned_tasks']}/"
+            f"{results['summary']['dynamic_tasks']} | "
+            f"path changed={results['summary']['dynamic_path_affected_tasks']}/"
+            f"{results['summary']['dynamic_tasks']} | "
+            f"replans={results['summary']['dynamic_replans']} | "
+            "unaffected trials="
+            f"{results['summary']['dynamic_interaction_failures']}"
+        )
     log.info(f"Success rate: {overall_success_rate:.1%}")
     log.info("=" * 60)
 

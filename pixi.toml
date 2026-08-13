@@ -120,8 +120,9 @@ CMAKE_PREFIX_PATH = "$CONDA_PREFIX"
 PKG_CONFIG_PATH = "$CONDA_PREFIX/lib/pkgconfig"
 # Force the host NVIDIA Vulkan ICD (conda's loader may not auto-find it).
 VK_ICD_FILENAMES = "/usr/share/vulkan/icd.d/nvidia_icd.json"
-# Keep ManiSkill assets in a known place + skip the interactive download prompt.
-MS_ASSET_DIR = "$HOME/.maniskill/data"
+# ManiSkill appends `/data` to this root internally. Pointing this at the data
+# directory itself would resolve assets under `~/.maniskill/data/data`.
+MS_ASSET_DIR = "$HOME/.maniskill"
 MS_SKIP_ASSET_DOWNLOAD_PROMPT = "1"
 
 # ---------------------------------------------------------------------------

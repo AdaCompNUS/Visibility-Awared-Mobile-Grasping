@@ -1,5 +1,6 @@
 import threading
 import time
+import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
 import gymnasium as gym
@@ -183,8 +184,26 @@ class ManiSkillEnv(RobotEnv):
         self._record_trajectory = False
         self._trajectory_buffer: List[Dict[str, Any]] = []
 
-        self._bg_thread = threading.Thread(target=self._background_loop, daemon=True)
+        self._background_error: Optional[str] = None
+        self._bg_thread = threading.Thread(
+            target=self._background_loop_guarded, daemon=True
+        )
         self._bg_thread.start()
+
+    def _background_loop_guarded(self):
+        try:
+            self._background_loop()
+        except BaseException:
+            self._background_error = traceback.format_exc()
+            self._stop_event.set()
+            raise
+
+    def raise_if_background_failed(self):
+        if self._background_error is not None:
+            raise RuntimeError(
+                "ManiSkill background stepping thread failed:\n"
+                + self._background_error
+            )
 
     def close(self):
         self._stop_event.set()
@@ -674,6 +693,7 @@ class ManiSkillEnv(RobotEnv):
             self._body_abs_target[2] = np.nan
 
     def is_motion_done(self) -> bool:
+        self.raise_if_background_failed()
         with self._lock:
             if len(self._merged_traj) == 0:
                 return True

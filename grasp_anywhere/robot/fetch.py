@@ -77,6 +77,10 @@ class Fetch:
         debug_config = config.get("debug", {})
         planning_config = config.get("planning", {})
         self.gaze_config = config.get("gaze", {})
+        self.replanning_check_interval_s = max(
+            0.05,
+            float(planning_config.get("replanning_check_interval_s", 0.5)),
+        )
 
         # Use parameter if provided, otherwise fallback to config
         costmap_path = robot_config.get("costmap_path", None)

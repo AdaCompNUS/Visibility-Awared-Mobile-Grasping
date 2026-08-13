@@ -14,9 +14,9 @@ class DynamicBenchmarkManager:
     """
     Manager for the navigation and manipulation dynamic benchmark challenges.
 
-    Navigation obstacles are kinematic actors which follow short arcs on ManiSkill's
-    Fetch-specific navigation mesh. Every arc is checked against the active
-    robot-to-goal connectivity before it is accepted, so an obstacle can invalidate
+    Navigation obstacles are kinematic actors which cross the active route on
+    ManiSkill's Fetch-specific navigation mesh. Every step is checked against the
+    active robot-to-goal connectivity, so an obstacle can invalidate
     the current plan without sealing the only route to the goal.
     """
 
@@ -25,9 +25,15 @@ class DynamicBenchmarkManager:
 
         # Public Tunable Parameters (Directly modified by external runners)
         self.enabled = False
-        self.trigger_angle_threshold = np.deg2rad(90)
         self.nav_trigger_distance = 1.7
         self.obstacle_speed = 0.35
+        self.nav_obstacle_xy_scale = 1.0
+        self.nav_obstacle_min_xy_scale = 1.0
+        self.nav_spawn_distance_min = 0.85
+        self.nav_spawn_preferred_distance = 1.10
+        self.nav_spawn_distance_max = 1.35
+        self.nav_path_change_threshold = 0.12
+        self.enable_manipulation_obstacles = True
         # Circumscribed radius of ManiSkill's Fetch base collision mesh (0.288 m),
         # rounded to the navigation-mesh resolution.
         self.robot_footprint_radius = 0.30
@@ -48,6 +54,27 @@ class DynamicBenchmarkManager:
         self._nav_origin: Optional[np.ndarray] = None
         self._nav_resolution = 0.0
         self._nav_tree: Optional[cKDTree] = None
+        self._nav_metrics = self._new_nav_metrics()
+
+    @staticmethod
+    def _new_nav_metrics() -> Dict[str, Any]:
+        return {
+            "spawn_attempts": 0,
+            "obstacle_spawned": False,
+            "spawn_robot_distance_m": None,
+            "spawn_route_distance_m": None,
+            "obstacle_clearance_m": None,
+            "obstacle_xy_scale": None,
+            "crossing_direction_xy": None,
+            "minimum_robot_obstacle_distance_m": None,
+            "maximum_robot_obstacle_distance_m": None,
+            "obstacle_distance_traveled_m": 0.0,
+            "maximum_route_departure_m": 0.0,
+            "replan_count": 0,
+            "path_changed": False,
+            "maximum_path_clearance_gain_m": 0.0,
+            "maximum_route_deviation_m": 0.0,
+        }
 
     @property
     def scene(self):
@@ -69,6 +96,7 @@ class DynamicBenchmarkManager:
         self._nav_origin = None
         self._nav_resolution = 0.0
         self._nav_tree = None
+        self._nav_metrics = self._new_nav_metrics()
         # _current_obstacle_config is set by the benchmark runner after reset.
 
     def set_current_obstacle_config(self, config: Dict[str, Any]):
@@ -82,6 +110,155 @@ class DynamicBenchmarkManager:
         if goal.size < 2:
             raise ValueError("Navigation goal must contain at least x and y")
         self._navigation_goal = goal[:2].copy()
+
+    def get_task_metrics(self) -> Dict[str, Any]:
+        """Return JSON-serializable evidence for this task's navigation challenge."""
+        return dict(self._nav_metrics)
+
+    @staticmethod
+    def _minimum_point_to_polyline_distance(
+        point_xy: np.ndarray, route_xy: np.ndarray
+    ) -> float:
+        point = np.asarray(point_xy, dtype=np.float32).reshape(2)
+        route = np.asarray(route_xy, dtype=np.float32)
+        if route.ndim != 2 or len(route) == 0 or route.shape[1] < 2:
+            return float("inf")
+        route = route[:, :2]
+        if len(route) == 1:
+            return float(np.linalg.norm(point - route[0]))
+        starts = route[:-1]
+        segments = route[1:] - starts
+        denom = np.sum(segments * segments, axis=1)
+        t = np.divide(
+            np.sum((point - starts) * segments, axis=1),
+            denom,
+            out=np.zeros_like(denom),
+            where=denom > 1e-12,
+        )
+        projections = starts + np.clip(t, 0.0, 1.0)[:, None] * segments
+        return float(np.min(np.linalg.norm(projections - point, axis=1)))
+
+    @staticmethod
+    def _descending_scales(maximum: float, minimum: float, step: float = 0.125):
+        maximum = max(float(maximum), 1e-3)
+        minimum = min(max(float(minimum), 1e-3), maximum)
+        scale_step = max(float(step), 1e-3)
+        scales = list(np.arange(maximum, minimum, -scale_step))
+        if not scales or not np.isclose(scales[-1], minimum):
+            scales.append(minimum)
+        return [float(scale) for scale in scales]
+
+    @staticmethod
+    def _route_crossing_direction(
+        point_xy: np.ndarray, route_xy: np.ndarray
+    ) -> np.ndarray:
+        route = np.asarray(route_xy, dtype=np.float32)
+        if route.ndim != 2 or not len(route) or route.shape[1] < 2:
+            return np.array([1.0, 0.0], dtype=np.float32)
+        route = route[:, :2]
+        nearest = int(np.argmin(np.linalg.norm(route - point_xy, axis=1)))
+        before = max(0, nearest - 1)
+        after = min(len(route) - 1, nearest + 1)
+        tangent = route[after] - route[before]
+        norm = float(np.linalg.norm(tangent))
+        if norm < 1e-6:
+            return np.array([1.0, 0.0], dtype=np.float32)
+        tangent /= norm
+        return np.array([-tangent[1], tangent[0]], dtype=np.float32)
+
+    @classmethod
+    def _maximum_route_deviation(
+        cls, previous_route_xy: np.ndarray, new_route_xy: np.ndarray
+    ) -> float:
+        previous = np.asarray(previous_route_xy, dtype=np.float32)
+        new = np.asarray(new_route_xy, dtype=np.float32)
+        if previous.ndim != 2 or new.ndim != 2 or not len(previous) or not len(new):
+            return 0.0
+        forward = max(
+            cls._minimum_point_to_polyline_distance(point[:2], previous[:, :2])
+            for point in new
+        )
+        backward = max(
+            cls._minimum_point_to_polyline_distance(point[:2], new[:, :2])
+            for point in previous
+        )
+        return float(max(forward, backward))
+
+    def record_navigation_replan(
+        self,
+        previous_base_path: List,
+        new_base_path: List,
+        robot_xy: np.ndarray,
+    ) -> None:
+        """Record whether a successful replan spatially avoided the moving obstacle."""
+        if not self.enabled or not self._triggered_nav or not self._dynamic_actors:
+            return
+
+        moving = next(
+            (
+                item
+                for item in self._dynamic_actors
+                if item.get("type") == "moving_pedestrian"
+            ),
+            None,
+        )
+        if moving is None:
+            return
+
+        previous = np.asarray(previous_base_path, dtype=np.float32)
+        new = np.asarray(new_base_path, dtype=np.float32)
+        if (
+            previous.ndim != 2
+            or new.ndim != 2
+            or previous.shape[1] < 2
+            or new.shape[1] < 2
+        ):
+            return
+
+        robot_xy = np.asarray(robot_xy, dtype=np.float32).reshape(-1)[:2]
+        previous_start = int(
+            np.argmin(np.linalg.norm(previous[:, :2] - robot_xy, axis=1))
+        )
+        new_start = int(np.argmin(np.linalg.norm(new[:, :2] - robot_xy, axis=1)))
+        previous_remaining = previous[previous_start:, :2]
+        new_remaining = new[new_start:, :2]
+        obstacle_xy = self._to_flat_numpy(moving["actor"].pose.p)[:2]
+
+        previous_clearance = self._minimum_point_to_polyline_distance(
+            obstacle_xy, previous_remaining
+        )
+        new_clearance = self._minimum_point_to_polyline_distance(
+            obstacle_xy, new_remaining
+        )
+        clearance_gain = float(new_clearance - previous_clearance)
+        route_deviation = self._maximum_route_deviation(
+            previous_remaining, new_remaining
+        )
+
+        self._nav_metrics["replan_count"] += 1
+        self._nav_metrics["maximum_path_clearance_gain_m"] = max(
+            float(self._nav_metrics["maximum_path_clearance_gain_m"]),
+            clearance_gain,
+        )
+        self._nav_metrics["maximum_route_deviation_m"] = max(
+            float(self._nav_metrics["maximum_route_deviation_m"]),
+            route_deviation,
+        )
+        spawn_route_distance = self._nav_metrics["spawn_route_distance_m"]
+        changed = (
+            spawn_route_distance is not None
+            and float(spawn_route_distance) <= self.nav_path_change_threshold
+            and route_deviation >= self.nav_path_change_threshold
+        )
+        if changed and not self._nav_metrics["path_changed"]:
+            print(
+                "[DynamicBenchmark] Path changed around moving obstacle. "
+                f"SpawnRouteDistance={float(spawn_route_distance):.2f}m, "
+                f"RouteDeviation={route_deviation:.2f}m"
+            )
+        self._nav_metrics["path_changed"] = bool(
+            self._nav_metrics["path_changed"] or changed
+        )
 
     def update(
         self, dt: float, base_position: np.ndarray, base_velocity: np.ndarray
@@ -150,6 +327,30 @@ class DynamicBenchmarkManager:
                 else:
                     q = self._to_flat_numpy(pose.q)
                 actor.set_pose(sapien.Pose(new_pos, q))
+                step_distance = float(np.linalg.norm(velocity_xy))
+                self._nav_metrics["obstacle_distance_traveled_m"] += step_distance
+                robot_distance = float(np.linalg.norm(new_pos[:2] - robot_xy))
+                previous_minimum = self._nav_metrics[
+                    "minimum_robot_obstacle_distance_m"
+                ]
+                if previous_minimum is None or robot_distance < previous_minimum:
+                    self._nav_metrics[
+                        "minimum_robot_obstacle_distance_m"
+                    ] = robot_distance
+                previous_maximum = self._nav_metrics[
+                    "maximum_robot_obstacle_distance_m"
+                ]
+                if previous_maximum is None or robot_distance > previous_maximum:
+                    self._nav_metrics[
+                        "maximum_robot_obstacle_distance_m"
+                    ] = robot_distance
+                route_departure = self._minimum_point_to_polyline_distance(
+                    new_pos[:2], item["route_xy"]
+                )
+                self._nav_metrics["maximum_route_departure_m"] = max(
+                    self._nav_metrics["maximum_route_departure_m"],
+                    route_departure,
+                )
             keep_actors.append(item)
         self._dynamic_actors = keep_actors
 
@@ -161,21 +362,14 @@ class DynamicBenchmarkManager:
         if not self._current_obstacle_config or self._navigation_goal is None:
             return
 
-        obstacle_start = np.asarray(
-            self._current_obstacle_config["start_position"], dtype=np.float32
-        )
-        robot_xy = np.asarray(base_position[:2], dtype=np.float32)
-        distance = float(np.linalg.norm(obstacle_start[:2] - robot_xy))
-        if distance > self.nav_trigger_distance:
-            return
-
+        self._nav_metrics["spawn_attempts"] += 1
         if self._spawn_moving_pedestrian(
             self._current_obstacle_config,
             np.asarray(base_position, dtype=np.float32),
         ):
             print(
                 f"[DynamicBenchmark] Triggered moving obstacle. "
-                f"EventDist={distance:.2f}"
+                f"RouteLookahead={self._nav_metrics['spawn_robot_distance_m']:.2f}m"
             )
             self._triggered_nav = True
         else:
@@ -278,7 +472,8 @@ class DynamicBenchmarkManager:
         ):
             return False
         components, _ = label(
-            free, structure=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+            free,
+            structure=np.ones((3, 3), dtype=np.int8),
         )
         robot_component = components[robot_grid[1], robot_grid[0]]
         return (
@@ -289,35 +484,44 @@ class DynamicBenchmarkManager:
     def _select_motion_path(
         self, item: Dict[str, Any], robot_xy: np.ndarray
     ) -> Optional[np.ndarray]:
-        """Select a connectivity-safe neighboring navmesh cell."""
+        """Advance a pedestrian across the route without orbiting the robot."""
+        del robot_xy
         if not self._prepare_navmesh() or self._navigation_goal is None:
             return None
 
         current_xy = self._to_flat_numpy(item["actor"].pose.p)[:2].astype(np.float32)
-        relative = current_xy - robot_xy
-        radius = float(np.linalg.norm(relative))
-        if radius < 1e-6:
-            return None
-
         _, vertex_index = self._nav_tree.query(current_xy)
         current_grid = self._nav_vertex_grid[int(vertex_index)]
         gx, gy = int(current_grid[0]), int(current_grid[1])
         previous_grid = item.get("previous_grid")
-        initial_direction = float(item["orbit_direction"])
+        route_xy = np.asarray(item["route_xy"], dtype=np.float32)
+        current_route_distance = self._minimum_point_to_polyline_distance(
+            current_xy, route_xy
+        )
+        initial_direction = np.asarray(item["travel_direction"], dtype=np.float32)
+        directions = (
+            (initial_direction,)
+            if item.get("direction_locked", False)
+            else (initial_direction, -initial_direction)
+        )
 
-        for direction in (initial_direction, -initial_direction):
-            tangent = (
-                direction
-                * np.array([-relative[1], relative[0]], dtype=np.float32)
-                / radius
-            )
+        for direction in directions:
+            norm = float(np.linalg.norm(direction))
+            if norm < 1e-6:
+                continue
+            direction = direction / norm
             candidates = []
-            for candidate_grid in (
-                (gx + 1, gy),
-                (gx - 1, gy),
-                (gx, gy + 1),
-                (gx, gy - 1),
+            for dx, dy in (
+                (1, 0),
+                (-1, 0),
+                (0, 1),
+                (0, -1),
+                (1, 1),
+                (1, -1),
+                (-1, 1),
+                (-1, -1),
             ):
+                candidate_grid = (gx + dx, gy + dy)
                 candidate_gx, candidate_gy = candidate_grid
                 if (
                     candidate_gx < 0
@@ -331,24 +535,36 @@ class DynamicBenchmarkManager:
                     [candidate_gx, candidate_gy], dtype=np.float32
                 )
                 step = target_xy - current_xy
-                alignment = float(np.dot(step, tangent))
-                radial_drift = abs(float(np.linalg.norm(target_xy - robot_xy)) - radius)
+                step_distance = float(np.linalg.norm(step))
+                if step_distance < 1e-8:
+                    continue
+                alignment = float(np.dot(step / step_distance, direction))
+                if alignment <= 1e-6:
+                    continue
+                route_distance = self._minimum_point_to_polyline_distance(
+                    target_xy, route_xy
+                )
+                if route_distance + 0.1 * self._nav_resolution < current_route_distance:
+                    continue
                 is_backtrack = previous_grid is not None and candidate_grid == tuple(
                     previous_grid
                 )
                 candidates.append(
-                    (is_backtrack, -alignment, radial_drift, candidate_grid, target_xy)
+                    (
+                        is_backtrack,
+                        -alignment,
+                        -route_distance,
+                        candidate_grid,
+                        target_xy,
+                    )
                 )
 
             candidates.sort(key=lambda candidate: candidate[:3])
             for _, _, _, candidate_grid, target_xy in candidates:
-                midpoint = 0.5 * (current_xy + target_xy)
-                if self._connectivity_safe(
-                    midpoint, robot_xy, item["clearance"]
-                ) and self._connectivity_safe(target_xy, robot_xy, item["clearance"]):
-                    item["previous_grid"] = (gx, gy)
-                    item["orbit_direction"] = direction
-                    return np.asarray([target_xy], dtype=np.float32)
+                item["previous_grid"] = (gx, gy)
+                item["travel_direction"] = direction.copy()
+                item["direction_locked"] = True
+                return np.asarray([target_xy], dtype=np.float32)
         return None
 
     def _spawn_moving_pedestrian(
@@ -361,14 +577,12 @@ class DynamicBenchmarkManager:
             obstacle_config["start_position"], dtype=np.float32
         )
         start_rot = np.asarray(obstacle_config["start_orientation"], dtype=np.float32)
-        dims = np.asarray(obstacle_config["dimension"], dtype=np.float32)
+        nominal_dims = np.asarray(obstacle_config["dimension"], dtype=np.float32).copy()
         robot_xy = np.asarray(base_position[:2], dtype=np.float32)
-        clearance = float(
-            self.robot_footprint_radius + 0.5 * np.hypot(dims[0], dims[1])
-        )
 
-        # Prefer positions intersecting the active path, then those closest to the
-        # configured trigger. This provokes replanning while preserving a detour.
+        # Place the obstacle on the active route at a controlled lookahead. The
+        # configured position supplies height/orientation only; route geometry
+        # determines the challenge position for every task.
         trajectory = np.asarray(getattr(self.env, "_merged_traj", []), dtype=np.float32)
         if trajectory.ndim != 2 or trajectory.shape[1] < 2:
             return False
@@ -379,37 +593,56 @@ class DynamicBenchmarkManager:
         if len(route_xy) > 128:
             route_xy = route_xy[:: max(1, len(route_xy) // 128)]
 
-        _, near_start = self._nav_tree.query(
-            configured_start[:2], k=min(128, len(self._nav_vertices))
-        )
         _, on_route = self._nav_tree.query(route_xy)
-        candidate_indices = np.unique(
-            np.concatenate((np.atleast_1d(near_start), np.atleast_1d(on_route))).astype(
-                np.int32
-            )
-        )
+        candidate_indices = np.unique(np.atleast_1d(on_route).astype(np.int32))
         candidates = self._nav_vertices[candidate_indices]
         robot_distances = np.linalg.norm(candidates - robot_xy, axis=1)
         path_distances = np.min(
             np.linalg.norm(candidates[:, None, :] - route_xy[None, :, :], axis=2),
             axis=1,
         )
-        configured_distances = np.linalg.norm(candidates - configured_start[:2], axis=1)
-        valid = (
-            (robot_distances > clearance)
-            & (robot_distances < self.nav_trigger_distance + 0.25)
-            & (path_distances < clearance)
+        preferred_distance = float(
+            np.clip(
+                self.nav_spawn_preferred_distance,
+                self.nav_spawn_distance_min,
+                self.nav_spawn_distance_max,
+            )
         )
-        scores = 3.0 * path_distances + configured_distances
-        candidate_order = np.argsort(np.where(valid, scores, np.inf))
+        scores = 10.0 * path_distances + np.abs(robot_distances - preferred_distance)
 
         start_xy = None
-        for candidate_index in candidate_order[:64]:
-            if not valid[candidate_index]:
-                break
-            candidate = candidates[candidate_index]
-            if self._connectivity_safe(candidate, robot_xy, clearance):
-                start_xy = candidate
+        dims = None
+        clearance = None
+        selected_scale = None
+        for xy_scale in self._descending_scales(
+            self.nav_obstacle_xy_scale, self.nav_obstacle_min_xy_scale
+        ):
+            candidate_dims = nominal_dims.copy()
+            candidate_dims[:2] *= xy_scale
+            candidate_clearance = float(
+                self.robot_footprint_radius
+                + 0.5 * np.hypot(candidate_dims[0], candidate_dims[1])
+            )
+            valid = (
+                (
+                    robot_distances
+                    >= max(candidate_clearance, self.nav_spawn_distance_min)
+                )
+                & (robot_distances <= self.nav_spawn_distance_max)
+                & (path_distances <= 1.5 * self._nav_resolution)
+            )
+            candidate_order = np.argsort(np.where(valid, scores, np.inf))
+            for candidate_index in candidate_order[:64]:
+                if not valid[candidate_index]:
+                    break
+                candidate = candidates[candidate_index]
+                if self._connectivity_safe(candidate, robot_xy, candidate_clearance):
+                    start_xy = candidate
+                    dims = candidate_dims
+                    clearance = candidate_clearance
+                    selected_scale = xy_scale
+                    break
+            if start_xy is not None:
                 break
         if start_xy is None:
             return False
@@ -428,17 +661,40 @@ class DynamicBenchmarkManager:
         speed = float(obstacle_config.get("speed", self.obstacle_speed))
         if speed <= 0.0:
             speed = self.obstacle_speed
+        crossing_direction = self._route_crossing_direction(start_xy, route_xy)
         self._dynamic_actors.append(
             {
                 "actor": actor,
                 "type": "moving_pedestrian",
                 "speed": speed,
                 "clearance": clearance,
-                "orbit_direction": 1.0,
+                "travel_direction": crossing_direction.copy(),
+                "direction_locked": False,
+                "route_xy": route_xy.copy(),
                 "previous_grid": None,
                 "motion_path": None,
                 "path_index": 0,
                 "path_retry_remaining": 0.0,
+            }
+        )
+        spawn_route_distance = self._minimum_point_to_polyline_distance(
+            start_xy, route_xy
+        )
+        self._nav_metrics.update(
+            {
+                "obstacle_spawned": True,
+                "spawn_robot_distance_m": float(np.linalg.norm(start_xy - robot_xy)),
+                "spawn_route_distance_m": spawn_route_distance,
+                "obstacle_clearance_m": clearance,
+                "minimum_robot_obstacle_distance_m": float(
+                    np.linalg.norm(start_xy - robot_xy)
+                ),
+                "maximum_robot_obstacle_distance_m": float(
+                    np.linalg.norm(start_xy - robot_xy)
+                ),
+                "obstacle_xy_scale": float(selected_scale),
+                "crossing_direction_xy": crossing_direction.tolist(),
+                "maximum_route_departure_m": spawn_route_distance,
             }
         )
         print(f"[DynamicBenchmark] Spawned moving obstacle at {start_pos}")
@@ -449,7 +705,7 @@ class DynamicBenchmarkManager:
         Public triggering method for manipulation obstacles.
         Spawns multiple random boxes around the target, avoiding the robot.
         """
-        if not self.enabled:
+        if not self.enabled or not self.enable_manipulation_obstacles:
             return
 
         if self._triggered_manip:

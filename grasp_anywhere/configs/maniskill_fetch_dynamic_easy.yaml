@@ -1,0 +1,76 @@
+robot:
+  urdf_path: "resources/fetch_ext/fetch ext.urdf"
+  costmap_path: None
+
+environment:
+  pcd_path: ""
+  pcd_files: []
+  ground_z_threshold: 0.1
+  scene_mode: "ray_casting"
+
+planning:
+  scheduler_type: "default" # Options: "default", "sequential", "nav_manip", "nav_prepose", "closed_loop"
+  manipulation_radius: 0.8
+  enable_replanning: True
+  enable_icp_refinement: False
+  enable_pcd_alignment: False
+  dynamic_costmap: True
+  capability_map_path: "resources/capability_map.pkl"
+  reachability_map_path: "resources/reachability_map.pkl"
+  torso_map_path: "resources/torso_map.pkl"
+
+services:
+  graspnet_url: "http://localhost:4003"
+  owl_url: "http://localhost:4000"
+  sam_url: "http://localhost:4001"
+
+debug:
+  enable_visualization: False
+  enable_debug: False
+  render_mode: "human"
+
+# Monitoring / benchmark critics (simple thresholds)
+# - hold is disabled when hold_seconds == 0.0
+monitor:
+  contact_force_threshold: 0.001
+  hold_seconds: 2.0
+  hold_slip_thresh_m: 0.05
+  hold_contact_grace_s: 0.2
+
+gaze:
+  type: "default" # Options: "default", "finean"
+  lookahead_window: 40
+  decay_rate: 0.999
+  velocity_weight: 1.0
+  joint_priorities:
+    base: 3.0
+    torso: 2.0
+    shoulder_lift: 1.3
+    elbow: 1.1
+    wrist_flex: 1.0
+    gripper: 1.0
+
+benchmark:
+  enable_dynamic_challenges: True
+  # One slow pedestrian is placed directly on the active route, normally 1.4489 m
+  # ahead. This leaves about 0.40 s more reaction time at the Fetch's 0.5 m/s
+  # maximum base speed than the measured 1.25 m calibration. The obstacle still
+  # invalidates the current route. Short routes use the closest safe point; the
+  # 0.30 m minimum prevents coverage gaps.
+  # Connectivity guarantees that a collision-free detour still exists.
+  nav_obstacle_speed: 0.12
+  # Use a single globally narrower pedestrian footprint. The planner still
+  # inflates it by the Fetch's 0.30 m base radius, and a trial only counts when
+  # the obstacle measurably changes the route. A 0.50 scale gives a 0.10 x
+  # 0.20 m physical footprint and roughly 0.41 m planning clearance after
+  # inflation.
+  nav_obstacle_xy_scale: 0.50
+  nav_obstacle_min_xy_scale: 0.50
+  nav_spawn_distance_min: 0.30
+  nav_spawn_preferred_distance: 1.4489
+  nav_spawn_distance_max: 1.70
+  nav_path_change_threshold: 0.10
+  # Keep the dynamic condition isolated to the moving navigation obstacle.
+  enable_manipulation_obstacles: False
+  # A trial is valid only if replanning measurably changes the base route.
+  require_dynamic_path_change: True

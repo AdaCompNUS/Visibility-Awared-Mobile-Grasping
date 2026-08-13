@@ -166,7 +166,7 @@ def move_to_config_with_replanning(
         robot: The Fetch robot instance (which contains the scene).
         goal_joints: The goal joint configuration (8-dof: [torso, 7 arm]).
         goal_base: The goal base configuration [x, y, theta].
-        enable_replanning: If True, enables the 1Hz replanning loop.
+        enable_replanning: If True, enables periodic collision checks and replanning.
         enable_pcd_alignment: If True, enables point cloud alignment during replanning.
         enable_gaze_control: If True, enables gaze optimization during motion.
         max_replan_attempts: Maximum attempts for replanning due to collisions or timeouts.
@@ -363,6 +363,18 @@ def move_to_config_with_replanning(
 
                 if plan_result and plan_result["success"]:
                     log.info("Replanning successful.")
+                    benchmark_manager = getattr(
+                        robot.robot_env, "benchmark_manager", None
+                    )
+                    if benchmark_manager is not None:
+                        try:
+                            benchmark_manager.record_navigation_replan(
+                                base_configs,
+                                plan_result["base_configs"],
+                                current_base,
+                            )
+                        except Exception as exc:
+                            log.warning(f"Could not record dynamic path change: {exc}")
                     arm_path = plan_result["arm_path"]
                     base_configs = plan_result["base_configs"]
                     try:
@@ -413,8 +425,14 @@ def move_to_config_with_replanning(
         else:
             log_info_throttle(5.0, "Path is clear. Continuing motion.")
 
-            # Replanning rate: 1 Hz, but update gaze at 10 Hz
-            for _ in range(5):
+            # Keep collision reaction timing explicit and shared across benchmark
+            # variants. Gaze still updates at up to 10 Hz between checks.
+            check_interval_s = max(
+                0.05,
+                float(getattr(robot, "replanning_check_interval_s", 0.5)),
+            )
+            wait_started = time.monotonic()
+            while time.monotonic() - wait_started < check_interval_s:
                 if robot.is_motion_done():
                     break
                 current_base_config = robot.get_base_params()
@@ -425,7 +443,9 @@ def move_to_config_with_replanning(
                     gaze_optimizer.update(waypoint_index)
 
                 _record_latest_episode(robot)
-                time.sleep(0.1)
+                remaining = check_interval_s - (time.monotonic() - wait_started)
+                if remaining > 0.0:
+                    time.sleep(min(0.1, remaining))
 
     # Cancel any pending head movements when body motion completes
     robot.cancel_head_goals()

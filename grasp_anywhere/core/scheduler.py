@@ -31,6 +31,7 @@ from grasp_anywhere.utils.perception_utils import get_pcd_from_mask
 from grasp_anywhere.utils.seg_utils import mask_from_segmentation_id, mask_from_uv
 from grasp_anywhere.utils.visualization_utils import (
     visualize_grasps,
+    visualize_pcd,
 )
 
 
@@ -310,13 +311,54 @@ class Scheduler:
                     # Fall through to pre-pose stage
                     current_outcome = "PERCEPTION_FAILURE"
                 else:
-                    # Predict grasps from RGB, depth, segmentation, and intrinsics.
+                    # --- Point Cloud Context Prediction (No Transfer) ---
+                    # 1. Get Full Point Cloud of the scene in Camera Frame
+                    full_mask = np.ones(depth.shape, dtype=bool)
+                    full_pcd_cam = get_pcd_from_mask(depth, full_mask, camera_intrinsic)
+
+                    # Transform to world frame
+                    full_pcd_cam_h = np.hstack(
+                        (full_pcd_cam, np.ones((full_pcd_cam.shape[0], 1)))
+                    )
+                    full_pcd_world = (camera_extrinsic @ full_pcd_cam_h.T).T[:, :3]
+
+                    # Filter using robot self-filter
+                    (
+                        filtered_world_list,
+                        _,
+                    ) = self.robot.filter_points_on_robot_with_state(
+                        full_pcd_world, joint_dict, point_radius=0.04
+                    )
+                    filtered_world = np.array(filtered_world_list)
+
+                    # Transform back to camera frame
+                    filtered_world_h = np.hstack(
+                        (filtered_world, np.ones((filtered_world.shape[0], 1)))
+                    )
+                    T_cam_world = np.linalg.inv(camera_extrinsic)
+                    full_pcd_cam = (T_cam_world @ filtered_world_h.T).T[:, :3]
+
+                    # Visualize the filtered point cloud
+                    if self.enable_visualization:
+                        visualize_pcd(
+                            full_pcd_cam,
+                            rgb,
+                            depth,
+                            camera_intrinsic,
+                        )
+
+                    segment_pcd_cam = object_pcd_cam
+
+                    # --- Zoom In and Predict Grasps (using functional interface) ---
                     pred_grasps_cam, scores = predict_grasps(
                         self.grasping_config,
+                        full_pc=full_pcd_cam,
+                        segment_pc=segment_pcd_cam,
                         rgb=rgb,
                         depth=depth,
                         segmap=segmap,
                         K=camera_intrinsic,
+                        visualize=self.enable_visualization,
                     )
 
                     if pred_grasps_cam is not None and len(pred_grasps_cam) > 0:
