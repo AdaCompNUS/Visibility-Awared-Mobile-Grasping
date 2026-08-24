@@ -6,6 +6,7 @@ environment:
   pcd_path: ""
   pcd_files: []
   ground_z_threshold: 0.1
+  scene_mode: "ray_casting"
 
 planning:
   scheduler_type: "default" # Options: "default", "sequential"

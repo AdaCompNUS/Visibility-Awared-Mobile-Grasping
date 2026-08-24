@@ -3,6 +3,7 @@ import time
 import numpy as np
 
 from grasp_anywhere.utils.logger import log
+from grasp_anywhere.utils.motion_utils import _update_collision_environment
 from grasp_anywhere.utils.perception_utils import depth2pc
 
 
@@ -66,14 +67,12 @@ def navigate(
 
     log.info(f"Starting navigation to {target_base_pose}...")
 
-    # --- Initial Plan ---
-    pcd_world = get_current_pcd(robot)
-    if pcd_world is None:
+    # Use the same maintained-scene refresh as the whole-body controller.  This is
+    # important for the dynamic benchmark: a single instantaneous depth cloud can
+    # miss a moving obstacle that is no longer in the current camera frustum.
+    snapshot = _update_collision_environment(robot)
+    if snapshot is None:
         return False, "SENSOR_FAILURE"
-
-    # Update Local Map (No Fusion)
-    robot.clear_pointclouds()
-    robot.add_pointcloud(pcd_world, filter_robot=True)
 
     current_base = robot.get_base_params()
 
@@ -132,11 +131,8 @@ def navigate(
 
         # --- Replanning Check ---
         if enable_replanning:
-            # Update Map
-            pcd_world_new = get_current_pcd(robot)
-            if pcd_world_new is not None:
-                robot.clear_pointclouds()
-                robot.add_pointcloud(pcd_world_new, filter_robot=True)
+            # Refresh the same maintained collision scene used by ours.
+            _update_collision_environment(robot)
 
             # Check Collision
             current_base = robot.get_base_params()
@@ -152,10 +148,9 @@ def navigate(
                 robot.stop_whole_body_motion()
 
                 replan_success = False
+                previous_base_configs = base_configs
                 for attempt in range(max_replan_attempts):
-                    pcd_world_new = get_current_pcd(robot)
-                    robot.clear_pointclouds()
-                    robot.add_pointcloud(pcd_world_new, filter_robot=True)
+                    _update_collision_environment(robot)
 
                     current_base = robot.get_base_params()
                     plan_result = robot.plan_base_motion(
@@ -166,10 +161,30 @@ def navigate(
 
                     if plan_result and plan_result["success"]:
                         log.info("Replanning successful.")
-                        base_configs = plan_result["base_configs"]
+                        new_base_configs = plan_result["base_configs"]
+                        benchmark_manager = getattr(
+                            robot.robot_env, "benchmark_manager", None
+                        )
+                        if benchmark_manager is not None:
+                            try:
+                                benchmark_manager.record_navigation_replan(
+                                    previous_base_configs,
+                                    new_base_configs,
+                                    current_base,
+                                )
+                            except Exception as exc:
+                                log.warning(
+                                    f"Could not record dynamic path change: {exc}"
+                                )
+
+                        base_configs = new_base_configs
                         arm_path = [fixed_arm_joints for _ in range(len(base_configs))]
 
                         if robot.start_whole_body_motion(arm_path, base_configs):
+                            # A replanned route has its own execution budget, matching
+                            # the whole-body controller's timeout semantics.
+                            start_time = time.time()
+                            timeout = len(base_configs) * 0.5 + 5.0
                             replan_success = True
                             break
 
@@ -179,4 +194,8 @@ def navigate(
                 if not replan_success:
                     return False, "REPLANNING_FAILURE"
 
-        time.sleep(0.1)
+        check_interval_s = max(
+            0.05,
+            float(getattr(robot, "replanning_check_interval_s", 0.5)),
+        )
+        time.sleep(check_interval_s)

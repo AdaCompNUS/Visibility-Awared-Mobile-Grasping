@@ -6,6 +6,7 @@ environment:
   pcd_path: ""
   pcd_files: []
   ground_z_threshold: 0.1
+  scene_mode: "ray_casting"
 
 planning:
   scheduler_type: "sequential" # Options: "default", "sequential"
@@ -37,6 +38,7 @@ monitor:
   hold_contact_grace_s: 0.2
 
 gaze:
+  type: "default" # Match shared low-level gaze controller used by ours.
   lookahead_window: 40
   decay_rate: 0.999
   velocity_weight: 1.0
