@@ -1,0 +1,5 @@
+assets/
+mshab_checkpoints/
+mshab_exps/
+wandb/
+configs/generated_*
