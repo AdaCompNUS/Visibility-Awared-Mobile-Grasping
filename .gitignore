@@ -61,3 +61,12 @@ rebuttal/
 
 # pixi environment (do not commit the solved env)
 .pixi/
+
+# paper video working files (large media, renders)
+video/assets/dropbox/
+video/assets/fetch_glb/
+video/out/
+video/.pixi/
+video/narration/*.mp3
+video/assets/models/object_detection_yolox_2022nov.onnx
+video/assets/fonts/InterVariable*.ttf

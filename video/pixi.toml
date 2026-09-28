@@ -1,0 +1,43 @@
+# pixi environment for the paper video (Blender-as-a-Python-module + compositing tools).
+#   pixi install          -> python 3.11 + bpy (Blender 4.x) + ffmpeg + imaging libs
+#   pixi run <cmd>        -> run inside the env
+# Blender is installed as the `bpy` wheel from PyPI (headless; Cycles renders on CUDA).
+[workspace]
+name = "mobile_grasping_video"
+version = "0.1.0"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.11.*"
+pip = "*"
+ffmpeg = ">=6"
+numpy = "<2"
+pillow = "*"
+imageio = "*"
+imageio-ffmpeg = "*"
+matplotlib = "*"
+opencv = "*"
+scipy = "*"
+trimesh = "*"
+pyyaml = "*"
+tqdm = "*"
+fonttools = "*"
+libstdcxx-ng = ">=13"
+libgcc-ng = ">=13"
+pycairo = ">=1.29.1,<2"
+
+[pypi-dependencies]
+bpy = "*"
+moviepy = "*"
+yourdfpy = "*"
+edge-tts = ">=7.2.8, <8"
+pycollada = ">=0.9.3, <0.10"
+openexr = ">=3.4.15, <4"
+
+[activation.env]
+CUDA_VISIBLE_DEVICES = "2"
+# keep BLAS/OpenCV thread pools small: many worker processes run in parallel on a shared box
+OMP_NUM_THREADS = "4"
+OPENBLAS_NUM_THREADS = "4"
+MKL_NUM_THREADS = "4"

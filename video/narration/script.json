@@ -1,0 +1,34 @@
+[
+ {
+  "id": "01_hook",
+  "text": "We consider mobile grasping in unknown and dynamic environments. Unmodelled clutter, people crossing the robot's path, and a single head camera with a limited field of view mean that the robot must actively gather the information it needs while it moves."
+ },
+ {
+  "id": "02_title",
+  "text": "This video presents Visibility-Aware Mobile Grasping in Dynamic Environments."
+ },
+ {
+  "id": "03_constraints",
+  "text": "A limited field of view introduces two visibility constraints. The collision visibility constraint requires the maintained map to cover the swept volume of the whole-body trajectory, so that a plan that is collision-free in the map is also safe in the world. The object visibility constraint requires the grasp configuration to keep the target in view, so that the underspecified grasp can be refined through observation. With a single camera, the two constraints compete for the robot's gaze."
+ },
+ {
+  "id": "04_method",
+  "text": "Our system enforces both constraints at runtime, within a receding-horizon loop that couples three policies. A velocity-aware active perception policy directs the gaze to the swept volume of the current trajectory, prioritising imminent and fast-moving regions. A hierarchical subgoal policy samples collision-free whole-body grasp and pre-grasp configurations that keep the target visible, and falls back to observation poses when manipulation is blocked. And a real-time whole-body motion planner replans within tens of milliseconds as the map is updated."
+ },
+ {
+  "id": "05_sim",
+  "text": "Here is a representative rollout in simulation, together with the head camera view and the robot's belief map. The robot starts without a map, observes the target region, and samples a pre-grasp configuration. While it moves, the gaze follows the swept volume. When an obstacle enters the planned route, the map is updated, the trajectory is invalidated, and the planner replans in real time."
+ },
+ {
+  "id": "06_real",
+  "text": "We deployed the full system on a Fetch mobile manipulator in forty autonomous trials across five indoor locations. The robot reacts to a person stepping into its route, navigates between tightly spaced chairs, and re-samples its pre-grasp configuration when manipulation is blocked. It achieved sixty-five percent success in unknown static scenes and fifty-five percent in dynamic scenes, close to the simulation results."
+ },
+ {
+  "id": "07_results",
+  "text": "Across four hundred randomised simulation scenarios, the full system achieves seventy point three percent success in unknown static environments and fifty-seven point nine percent in dynamic environments. This is an improvement of sixteen point three and nine point three percentage points over the decoupled navigation-and-manipulation baseline. The gains come mainly from collision safety. Learning-based policies fail predominantly through collisions, and removing velocity weighting from the gaze objective more than doubles the collision rate in static scenes."
+ },
+ {
+  "id": "08_outro",
+  "text": "In summary, interleaving whole-body planning with active perception allows a mobile manipulator to grasp safely in environments it cannot fully observe. Thank you for watching."
+ }
+]
