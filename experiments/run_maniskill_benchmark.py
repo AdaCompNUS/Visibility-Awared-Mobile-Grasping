@@ -10,9 +10,11 @@ Evaluation: Single attempt per object, real-time monitoring during execution
 Collision Detection: Integrated into environment step loop, stops motion on collision or success
 """
 import argparse
+import hashlib
 import json
 import multiprocessing
 import os
+import random
 import re
 import sys
 import time
@@ -80,6 +82,12 @@ def init_worker(gpu_queue):
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
 
+def derive_task_seed(run_seed: int, scene_id: str, task_idx: int) -> int:
+    """Derive a stable 32-bit task seed without Python's randomized hash()."""
+    payload = f"{int(run_seed)}:{scene_id}:{int(task_idx)}".encode("utf-8")
+    return int.from_bytes(hashlib.blake2s(payload, digest_size=4).digest(), "little")
+
+
 def process_single_scene(args):
     (
         scene_id,
@@ -89,6 +97,7 @@ def process_single_scene(args):
         save_trajectory,
         trajectory_dir,
         task_ids,
+        run_seed,
     ) = args
 
     with open(config_path, "r") as f:
@@ -175,6 +184,19 @@ def process_single_scene(args):
     for task_idx, task in enumerate(grasp_tasks):
         if task_ids is not None and task_idx not in task_ids:
             continue
+        task_seed = None
+        if run_seed is not None:
+            task_seed = derive_task_seed(run_seed, scene_id, task_idx)
+            random.seed(task_seed)
+            np.random.seed(task_seed)
+            try:
+                import torch
+
+                torch.manual_seed(task_seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(task_seed)
+            except ImportError:
+                pass
         # if task_idx != 18:
         #     continue
         log.info(f"Task {task_idx+1}/{len(grasp_tasks)}: {task['model_id']}")
@@ -187,6 +209,7 @@ def process_single_scene(args):
             "gripper_touched_object": False,
             "success": False,
             "failure_reason": None,
+            "task_seed": task_seed,
         }
 
         # Reset environment for this task
@@ -205,7 +228,10 @@ def process_single_scene(args):
                 sim_env.env.unwrapped.scene, id=f"ycb:{model_id}"
             )
             builder.initial_pose = sapien.Pose(p=position, q=orientation)
-            actor_name = f"ycb_{model_id}_{uuid.uuid4().hex[:8]}"
+            if task_seed is None:
+                actor_name = f"ycb_{model_id}_{uuid.uuid4().hex[:8]}"
+            else:
+                actor_name = f"ycb_{model_id}_{scene_id}_t{task_idx}_i{i}"
             builder.build(name=actor_name)
 
             if i == task_idx:
@@ -451,12 +477,6 @@ def run_benchmark() -> None:
     """
     from grasp_anywhere.utils.logger import log
 
-    # log.info("Starting ManiSkill Benchmark")
-    # Load benchmark data
-    benchmark_path: str = "resources/grasp_benchmark.json"
-    with open(benchmark_path, "r") as f:
-        benchmark_data: dict[str, dict | list | str | int | float | None] = json.load(f)
-
     # Initialize results tracking
     results: dict[str, str | dict | int] = {
         "timestamp": datetime.now().isoformat(),
@@ -503,6 +523,11 @@ def run_benchmark() -> None:
         help="Path to configuration file (default: grasp_anywhere/configs/maniskill_fetch.yaml)",
     )
     parser.add_argument(
+        "--benchmark",
+        default="resources/grasp_benchmark.json",
+        help="Benchmark JSON path (default: resources/grasp_benchmark.json)",
+    )
+    parser.add_argument(
         "-t",
         "--save-trajectory",
         action="store_true",
@@ -528,7 +553,30 @@ def run_benchmark() -> None:
         default=None,
         help="Optional zero-based task IDs within each selected scene",
     )
+    parser.add_argument(
+        "--run-seed",
+        type=int,
+        default=None,
+        help="Independent-run seed used to derive stable per-task random seeds",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Exact output directory (default: timestamped results/<method>/run_*)",
+    )
+    parser.add_argument(
+        "--run-label",
+        default=None,
+        help="Optional campaign/run label stored in result provenance",
+    )
     args = parser.parse_args()
+
+    benchmark_path = args.benchmark
+    with open(benchmark_path, "rb") as f:
+        benchmark_bytes = f.read()
+    benchmark_data: dict[str, dict | list | str | int | float | None] = json.loads(
+        benchmark_bytes
+    )
 
     if args.scenes is not None:
         unknown_scenes = sorted(set(args.scenes) - set(benchmark_data))
@@ -572,12 +620,13 @@ def run_benchmark() -> None:
     method_suffix = "dyn" if enable_dynamic else "static"
     method_name = f"{method_prefix}_{method_suffix}"
 
-    # Prepare results file with method-based folder structure
-    # Create a unique run folder for this benchmark execution
-    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_id = uuid.uuid4().hex[:6]
-    results_dir = os.path.join("results", method_name)
-    run_dir = os.path.join(results_dir, f"run_{run_timestamp}_{run_id}")
+    if args.output_dir is None:
+        run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id = uuid.uuid4().hex[:6]
+        results_dir = os.path.join("results", method_name)
+        run_dir = os.path.join(results_dir, f"run_{run_timestamp}_{run_id}")
+    else:
+        run_dir = os.path.abspath(args.output_dir)
     os.makedirs(run_dir, exist_ok=True)
 
     # Create trajectory directory if saving trajectories
@@ -587,10 +636,19 @@ def run_benchmark() -> None:
         os.makedirs(trajectory_dir, exist_ok=True)
 
     results_file = os.path.join(run_dir, "benchmark_results.json")
+    if os.path.exists(results_file):
+        parser.error(f"Refusing to overwrite existing result: {results_file}")
+    with open(config_path, "rb") as f:
+        config_sha256 = hashlib.sha256(f.read()).hexdigest()
     results["config"] = {
         "config_path": config_path,
+        "config_sha256": config_sha256,
+        "benchmark_path": benchmark_path,
+        "benchmark_sha256": hashlib.sha256(benchmark_bytes).hexdigest(),
         "scheduler_type": scheduler_type,
         "method_name": method_name,
+        "run_seed": args.run_seed,
+        "run_label": args.run_label,
         "replanning_check_interval_s": run_config.get("planning", {}).get(
             "replanning_check_interval_s",
             0.5,
@@ -613,6 +671,7 @@ def run_benchmark() -> None:
             args.save_trajectory,
             trajectory_dir,
             args.task_ids,
+            args.run_seed,
         )
         for scene_id, scene_data in benchmark_data.items()
     ]
