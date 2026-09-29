@@ -221,8 +221,8 @@ class GraspPlanner:
                     for sol in sols:
                         if sol is None or len(sol) != 8:
                             continue
-                        if not self.robot.vamp_module.validate(
-                            sol, self.robot.planning_env
+                        if self.robot.validate_whole_body_config(
+                            sol, planning_base_config
                         ):
                             continue
                         valid_solution = sol
@@ -282,7 +282,7 @@ class GraspPlanner:
 
         # Calculate lift target (Cartesian) from pre_grasp_joints (which are valid and reachable)
         pre_grasp_full_config = [torso_pos] + pre_grasp_joints
-        pg_ee_pos_b, pg_ee_quat_b = self.robot.vamp_module.eefk(pre_grasp_full_config)
+        pg_ee_pos_b, pg_ee_quat_b = self.robot.eefk(pre_grasp_full_config)
         result = self.robot.send_cartesian_interpolated_motion(
             pg_ee_pos_b,
             pg_ee_quat_b,

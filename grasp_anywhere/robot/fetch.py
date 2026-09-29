@@ -6,7 +6,6 @@ from time import time
 import numpy as np
 import open3d as o3d
 import rospy
-import vamp
 import yaml
 from scipy.spatial.transform import Rotation as R
 from sensor_msgs import point_cloud2
@@ -16,7 +15,6 @@ from sensor_msgs.msg import (
 )
 from std_msgs.msg import Header
 
-import grasp_anywhere.robot.utils.replanning_utils as replanning_utils
 import grasp_anywhere.robot.utils.transform_utils as transform_utils
 from grasp_anywhere.dataclass.datacollector.config import DataCollectionConfig
 from grasp_anywhere.envs.base import RobotEnv
@@ -29,11 +27,6 @@ from grasp_anywhere.robot.ik.ikfast_api import JOINT_LIMITS_LOWER, JOINT_LIMITS_
 from grasp_anywhere.robot.kinematics import (
     _create_transform_matrix,
     forward_kinematics,
-)
-from grasp_anywhere.robot.utils.whole_body_planners import (
-    plan_base_only,
-    plan_fcit_wb_whole_body,
-    plan_rrtc_whole_body,
 )
 from grasp_anywhere.samplers.base_sampler import BaseSampler
 from grasp_anywhere.utils.logger import log
@@ -155,12 +148,29 @@ class Fetch:
         self.planner = "rrtc"  # ["rrtc", "fcit", "prm"]
         # Whole-body planner option: "rrtc" (default) or "fcit_wb"
         self.whole_body_planner = "rrtc"
-        # Bounds over XY for FCIT*, updated when adding pointclouds
-        self._pc_bounds_xy = None  # tuple (x_min, x_max, y_min, y_max)
-        self._bounds_padding = 0.1
 
-        # Initialize VAMP planner
-        self._init_vamp_planner()
+        # Motion planning + collision checking backend: "vamp" (the vendored
+        # VAMP fork: multilayer RRT-Connect + Hybrid A*) or "fetch_planning"
+        # (the fetch-planning package: FLASK kinodynamic planner).
+        self.motion_planner = planning_config.get("motion_planner", "vamp")
+        if self.motion_planner == "fetch_planning":
+            from grasp_anywhere.robot.utils.fetch_planning_backend import (
+                FetchPlanningBackend,
+            )
+
+            self.planner_backend = FetchPlanningBackend(
+                planning_config.get("fetch_planning")
+            )
+        elif self.motion_planner == "vamp":
+            from grasp_anywhere.robot.utils.vamp_backend import VampBackend
+
+            self.planner_backend = VampBackend(self.planner)
+        else:
+            raise ValueError(f"Unknown planning.motion_planner: {self.motion_planner}")
+        log.info(f"Motion planner: {self.motion_planner}")
+
+        # One record per planner call; the benchmark stores them per task.
+        self.planning_log = []
 
         # Initialize attachment tracking
         self._current_attachment = None
@@ -252,8 +262,8 @@ class Fetch:
             if not solutions:
                 continue
 
-            # VAMP set_base_params takes (theta, x, y)
-            self.vamp_module.set_base_params(
+            # set_base_params takes (theta, x, y)
+            self.planner_backend.set_base_params(
                 base_config[2], base_config[0], base_config[1]
             )
             for sol in solutions:
@@ -267,14 +277,11 @@ class Fetch:
                 #     continue
 
                 # Validate whole body config: arm_config=sol (8-dof), base_config=[x, y, theta]
-                if not self.vamp_module.validate_whole_body_config(
-                    sol, base_config, self.planning_env
-                ):
+                if not self.planner_backend.validate(sol, base_config):
                     continue
-                if not self.vamp_module.validate_whole_body_config(
+                if not self.planner_backend.validate(
                     [0.3, 1.32, 1.4, -0.2, 1.72, 0.0, 1.66, 0.0],
                     base_config,
-                    self.planning_env,
                 ):
                     continue
                 full_solution = list[float](base_config) + list[float](sol)
@@ -342,11 +349,7 @@ class Fetch:
             It returns `not validate(...)`, and validate() usually returns True for valid.
             So this function returns True if INVALID.
         """
-        # self.vamp_module.set_base_params(base_config[2], base_config[0], base_config[1]) # [theta, x, y]
-        # return not self.vamp_module.validate(arm_config, self.planning_env)
-        return not self.vamp_module.validate_whole_body_config(
-            arm_config, base_config, self.planning_env
-        )
+        return not self.planner_backend.validate(arm_config, base_config)
 
     def get_end_effector_pose(self, joint_values=None, base_config=None):
         """
@@ -372,7 +375,7 @@ class Fetch:
             base_config = self.get_base_params()
 
         # Call the eefk function to get the end effector pose in robot frame
-        ee_pos, ee_quat = self.vamp_module.eefk(joint_values)
+        ee_pos, ee_quat = self.eefk(joint_values)
 
         # Transform to world frame using the utility function
         world_pos, world_quat = transform_utils.transform_pose_to_world(
@@ -393,32 +396,34 @@ class Fetch:
                 self.motion_state = "FAILED"
             log.debug(f"Motion execution finished callback: success={msg.data}")
 
-    def _init_vamp_planner(self):
+    @property
+    def vamp_module(self):
+        """VAMP robot module (``motion_planner: vamp`` only)."""
+        return self.planner_backend.vamp_module
+
+    @property
+    def planning_env(self):
+        """VAMP collision environment (``motion_planner: vamp`` only)."""
+        return self.planner_backend.env
+
+    def eefk(self, joint_values):
+        """End-effector (position, quaternion xyzw) in the base frame.
+
+        Args:
+            joint_values: 8-DOF [torso, 7 arm joints]
         """
-        Initialize VAMP motion planner with 8-DOF configuration and collision settings.
+        return self.planner_backend.eefk(joint_values)
 
-        This function sets up the planning environment and configures the motion planner
-        with appropriate parameters for collision avoidance.
-        """
-        self.planning_env = vamp.Environment()
-
-        # Configure robot and planner with custom settings
-        (
-            self.vamp_module,
-            self.planner_func,
-            self.plan_settings,
-            self.simp_settings,
-        ) = vamp.configure_robot_and_planner_with_kwargs(
-            "fetch",  # Robot name
-            self.planner,  # Planner algorithm (Rapidly-exploring Random Tree Connect)
-            sampler_name="halton",  # Use Halton sampler for better coverage
-        )
-
-        # Initialize the sampler
-        self.sampler = self.vamp_module.halton()
-        self.sampler.skip(0)  # Skip initial samples if needed
-
-        log.info("VAMP planner initialized with collision avoidance settings")
+    def _log_plan(self, kind, started, success, stats):
+        """Record one planner call (wall time covers plan + post-processing)."""
+        record = {
+            "kind": kind,
+            "planner": self.motion_planner,
+            "success": bool(success),
+            "wall_time_ms": (time() - started) * 1e3,
+        }
+        record.update(stats)
+        self.planning_log.append(record)
 
     def set_base_params(self, theta, x, y):
         """
@@ -433,8 +438,8 @@ class Fetch:
         self.base_x = x
         self.base_y = y
 
-        # Update the base parameters in the VAMP module
-        self.vamp_module.set_base_params(theta, x, y)
+        # Update the base parameters in the planner
+        self.planner_backend.set_base_params(theta, x, y)
 
         return True
 
@@ -638,45 +643,20 @@ class Fetch:
         return T_base_head_tilt @ T_head_tilt_camera
 
     def _plan_arm(self, current_joints, target_joints):
-        """Plan a path using VAMP motion planner for 8-DOF configuration."""
+        """Plan a path for the 8-DOF torso+arm with the base fixed."""
         current_joints = np.array(current_joints, dtype=np.float64)
         target_joints = np.array(target_joints, dtype=np.float64)
 
-        log.info("Planning with VAMP (8-DOF):")
+        log.info(f"Planning with {self.motion_planner} (8-DOF):")
         log.info(f"Start config values: {current_joints}")
         log.info(f"Goal config values: {target_joints}")
 
-        result = self.planner_func(
-            current_joints,
-            target_joints,
-            self.planning_env,
-            self.plan_settings,
-            self.sampler,
+        started = time()
+        trajectory_points, stats = self.planner_backend.plan_arm(
+            self.get_base_params(), current_joints, target_joints
         )
-
-        if result.solved:
-            log.info("Path planning succeeded!")
-
-            # Get planning statistics
-            simple = self.vamp_module.simplify(
-                result.path, self.planning_env, self.simp_settings, self.sampler
-            )
-
-            _ = vamp.results_to_dict(result, simple)
-
-            # Interpolate path
-            interpolate = 16
-            simple.path.interpolate(interpolate)
-
-            # Convert path to trajectory points
-            trajectory_points = []
-            for i in range(len(simple.path)):
-                point = simple.path[i].to_list()
-                trajectory_points.append(point)
-
-            return trajectory_points
-        else:
-            return None
+        self._log_plan("arm", started, trajectory_points is not None, stats)
+        return trajectory_points
 
     def plan_whole_body_motion(
         self,
@@ -724,57 +704,28 @@ class Fetch:
         log.info(f"Goal base config: {goal_base}")
 
         # Check if the start and goal whole body configurations are in collision
+        started = time()
         if self.validate_whole_body_config(start_joints, start_base):
             log.warning("Start whole body configuration is in collision")
+            self._log_plan("whole_body", started, False, {"status": "invalid_start"})
             return False
         if self.validate_whole_body_config(goal_joints, goal_base):
             log.warning("Goal whole body configuration is in collision")
+            self._log_plan("whole_body", started, False, {"status": "invalid_goal"})
             return False
 
         planner_to_use = planner if planner is not None else self.whole_body_planner
 
-        if planner_to_use == "fcit_wb":
-            if self._pc_bounds_xy is None:
-                log.warning(
-                    "FCIT* selected but XY bounds are not available. Consider calling add_pointcloud first."
-                )
-            res = plan_fcit_wb_whole_body(
-                start_joints,
-                goal_joints,
-                start_base,
-                goal_base,
-                self.planning_env,
-                self.vamp_module,
-                self._pc_bounds_xy,
-                random_generator=self.sampler,
-                settings_overrides=fcit_settings_overrides,
-                interpolate_density=0.08,
-            )
-            # Print FCIT* time and stats similar to the example script
-            stats = res.get("stats", {})
-            if stats:
-                time_ms = stats.get("arm_planning_time_ms")
-                iters = stats.get("planning_iterations")
-                graph = stats.get("planning_graph_size")
-                if time_ms is not None:
-                    log.info(
-                        f"FCIT* Planning Time: {time_ms * 1000:.0f}μs | Iterations: {iters} | Graph size: {graph}"
-                    )
-            return res
-
-        # Default path: multilayer RRTC
-        return plan_rrtc_whole_body(
+        res = self.planner_backend.plan_whole_body(
             start_joints,
             goal_joints,
             start_base,
             goal_base,
-            self.planning_env,
-            self.vamp_module,
-            self.plan_settings,
-            self.simp_settings,
-            self.sampler,
-            interpolate_density=0.03,
+            planner=planner_to_use,
+            fcit_settings_overrides=fcit_settings_overrides,
         )
+        self._log_plan("whole_body", started, res["success"], res["stats"])
+        return res
 
     def plan_base_motion(
         self,
@@ -809,16 +760,12 @@ class Fetch:
         log.info(f"Start base config: {start_base}")
         log.info(f"Goal base config: {goal_base}")
 
-        return plan_base_only(
-            start_base,
-            goal_base,
-            self.planning_env,
-            self.vamp_module,
-            self.simp_settings,
-            self.sampler,
-            start_arm,
-            settings_overrides=settings_overrides,
+        started = time()
+        res = self.planner_backend.plan_base(
+            start_base, goal_base, start_arm, settings_overrides=settings_overrides
         )
+        self._log_plan("base", started, res["success"], res["stats"])
+        return res
 
     def execute_whole_body_motion(self, arm_path, base_configs):
         """
@@ -899,10 +846,7 @@ class Fetch:
             name: optional name for the sphere
         """
         position = list(position)  # Convert to list to ensure correct type
-        sphere = vamp.Sphere(position, radius)
-        if name:
-            sphere.name = name
-        self.planning_env.add_sphere(sphere)
+        self.planner_backend.add_sphere(position, radius, name)
 
     def filter_points_on_robot_with_state(self, points, joint_dict, point_radius=0.1):
         """
@@ -943,15 +887,15 @@ class Fetch:
         # Set base in VAMP
         self.set_base_params(current_base[2], current_base[0], current_base[1])
 
-        # Ensure points are in list format for VAMP
+        # Ensure points are in list format for the planner
         if isinstance(points, np.ndarray):
             points_list = points.tolist()
         else:
             points_list = points
 
-        # Call VAMP's robot filtering function
-        filtered_points = self.vamp_module.filter_fetch_from_pointcloud(
-            points_list, current_joints, current_base, self.planning_env, point_radius
+        # Filter the robot's own points
+        filtered_points = self.planner_backend.filter_robot(
+            points_list, current_joints, current_base, point_radius
         )
 
         robot_filter_time = time() - robot_filter_start_time
@@ -992,15 +936,15 @@ class Fetch:
         current_base = self.get_base_params()
         self.set_base_params(current_base[2], current_base[0], current_base[1])
 
-        # Ensure points are in list format for VAMP
+        # Ensure points are in list format for the planner
         if isinstance(points, np.ndarray):
             points_list = points.tolist()
         else:
             points_list = points
 
-        # Call VAMP's robot filtering function
-        filtered_points = self.vamp_module.filter_fetch_from_pointcloud(
-            points_list, current_joints, current_base, self.planning_env, point_radius
+        # Filter the robot's own points
+        filtered_points = self.planner_backend.filter_robot(
+            points_list, current_joints, current_base, point_radius
         )
 
         robot_filter_time = time() - robot_filter_start_time
@@ -1068,32 +1012,14 @@ class Fetch:
                 pc2_msg = point_cloud2.create_cloud(header, fields, points_for_pcl)
                 self.pointcloud_publisher.publish(pc2_msg)
 
-        # Define robot-specific radius parameters
-        r_min, r_max = vamp.ROBOT_RADII_RANGES[
-            "fetch"
-        ]  # Min/max sphere radius for Fetch robot
-
         # Add the filtered point cloud to the environment
-        # Ensure points are in list format for vamp
+        # Ensure points are in list format for the planner
         if isinstance(points_to_use, np.ndarray):
             points_to_use = points_to_use.tolist()
 
-        # add_start_time = time()
-        _ = self.planning_env.add_pointcloud(points_to_use, r_min, r_max, point_radius)
-        # add_time = time() - add_start_time
+        self.planner_backend.add_pointcloud(points_to_use, point_radius)
 
         processing_time = time() - start_time
-
-        # Update FCIT* XY bounds from the point cloud for whole-body planning.
-        pts_np = np.array(points_to_use, dtype=np.float64)
-        if pts_np.size > 0 and pts_np.shape[1] == 3:
-            min_xy = pts_np[:, :2].min(axis=0)
-            max_xy = pts_np[:, :2].max(axis=0)
-            x_min = float(min_xy[0] - self._bounds_padding)
-            x_max = float(max_xy[0] + self._bounds_padding)
-            y_min = float(min_xy[1] - self._bounds_padding)
-            y_max = float(max_xy[1] + self._bounds_padding)
-            self._pc_bounds_xy = (x_min, x_max, y_min, y_max)
 
         return processing_time
 
@@ -1133,26 +1059,22 @@ class Fetch:
             )
             return False
 
-        attachment = vamp.Attachment(offset_position, offset_orientation_xyzw)
-
         if not isinstance(spheres_params, list) or not all(
             isinstance(s, dict) for s in spheres_params
         ):
             raise ValueError("spheres_params must be a list of sphere dictionaries.")
 
-        vamp_spheres = []
         for s_params in spheres_params:
             if "position" not in s_params or "radius" not in s_params:
                 raise ValueError(
                     "Each sphere in the list must have 'position' and 'radius'."
                 )
-            vamp_spheres.append(
-                vamp.Sphere(list(s_params["position"]), s_params["radius"])
-            )
 
-        attachment.add_spheres(vamp_spheres)
-
-        self.planning_env.attach(attachment)
+        attachment = self.planner_backend.attach(
+            spheres_params, offset_position, offset_orientation_xyzw
+        )
+        if attachment is None:
+            return False
         self._current_attachment = attachment
         return True
 
@@ -1161,7 +1083,7 @@ class Fetch:
         Detaches the currently active collision object(s) from the end-effector.
         """
         if self._current_attachment:
-            self.planning_env.detach()
+            self.planner_backend.detach()
             self._current_attachment = None
             return True
         else:
@@ -1287,7 +1209,7 @@ class Fetch:
         current_full_config = [current_torso] + current_arm_joints
 
         # Get EE pose in robot base frame from FK
-        current_ee_pos_base, current_ee_quat_base = self.vamp_module.eefk(
+        current_ee_pos_base, current_ee_quat_base = self.eefk(
             current_full_config
         )
 
@@ -1496,16 +1418,16 @@ class Fetch:
 
     def clear_pointclouds(self):
         """
-        Clears all point cloud collision objects from the VAMP environment.
+        Clears all point cloud collision objects from the planning environment.
         This is useful for updating the environment with new sensor data.
         """
-        self.planning_env.clear_pointclouds()
+        self.planner_backend.clear_pointclouds()
 
     def clear_spheres(self):
         """
-        Clears all sphere collision objects from the VAMP environment.
+        Clears all sphere collision objects from the planning environment.
         """
-        self.planning_env.clear_spheres()
+        self.planner_backend.clear_spheres()
 
     def check_plan_for_collisions(self, arm_path, base_configs, current_waypoint_index):
         """
@@ -1521,12 +1443,8 @@ class Fetch:
         Returns:
             bool: True if a collision is detected, False otherwise.
         """
-        return replanning_utils.check_trajectory_for_collisions(
-            self.vamp_module,
-            self.planning_env,
-            arm_path,
-            base_configs,
-            current_waypoint_index,
+        return self.planner_backend.path_in_collision(
+            arm_path, base_configs, current_waypoint_index
         )
 
     def get_rgb(self):

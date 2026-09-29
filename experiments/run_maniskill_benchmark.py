@@ -372,6 +372,8 @@ def process_single_scene(args):
         task_result["gripper_touched_object"] = bool(has_success)
         task_result["success"] = bool(has_hold_success) and not has_collision
         task_result["hold_success"] = bool(has_hold_success)
+        task_result["motion_planner"] = fetch_robot.motion_planner
+        task_result["planning_calls"] = fetch_robot.planning_log
 
         dynamic_requirement_failed = False
         if sim_env.benchmark_manager.enabled:

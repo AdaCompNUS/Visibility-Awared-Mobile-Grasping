@@ -108,6 +108,8 @@ pydub = "*"
 # The vendored C/C++ modules — compiled on `pixi install` (CMake via the pip cmake).
 pytracik = { path = "third_party/pytracik" }
 vamp = { path = "third_party/vamp" }
+# Whole-body OMPL+VAMP planner with the FLASK kinodynamic planner (prebuilt wheel).
+fetch-planning = "==0.3.0"
 # The project itself (editable) — compiles the ikfast_fetch C++ extension.
 mobile_grasping_in_dynamic = { path = ".", editable = true }
 
